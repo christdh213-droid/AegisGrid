@@ -84,7 +84,7 @@ function displayTracks(tracks) {
       }
       label = trackLabels.get(track.track_id);
     }
-    return [{x,y,label,speed:track.speed}];
+    return [{...track,x,y,label,kind,speed:track.speed}];
   });
 }
 function receive(buffer){
@@ -259,7 +259,8 @@ function draw(now){
         if(i)ctx.lineTo(point.x,point.y);else ctx.moveTo(point.x,point.y);
       });
       const blocked = route.path_status === 'BLOCKED';
-      ctx.strokeStyle = blocked ? '#b6ac9590' : '#6ef5dc';
+      const gradient=ctx.createLinearGradient(0,height,width,0);gradient.addColorStop(0,'#45a9ea');gradient.addColorStop(1,'#91ffe1');
+      ctx.strokeStyle = blocked ? '#b6ac9590' : gradient;ctx.shadowColor='#65eddb';ctx.shadowBlur=blocked?0:12;ctx.lineCap='round';ctx.lineJoin='round';
       ctx.lineWidth = blocked ? 2 : 4;
       if(blocked)ctx.setLineDash([7,8]);
       ctx.stroke();
@@ -268,7 +269,7 @@ function draw(now){
       const goal=transform.worldToScreen(...route.goal_xy);
       ctx.setLineDash([]);
       ctx.strokeStyle = route.path_status === 'BLOCKED' ? '#ffc36e' : '#6ef5dc';
-      ctx.lineWidth=2;ctx.beginPath();ctx.arc(goal.x,goal.y,7,0,Math.PI*2);ctx.stroke();
+      ctx.lineWidth=2;ctx.beginPath();ctx.arc(goal.x,goal.y,reducedMotion.matches?8:8+2*Math.sin(now/350),0,Math.PI*2);ctx.stroke();
     }
     ctx.restore();
     const occupiedTags = [];
@@ -277,9 +278,15 @@ function draw(now){
       const point = transform.worldToScreen(track.x, track.y);
       ctx.strokeStyle = '#9de1bc';
       ctx.lineWidth = 1;
-      ctx.strokeRect(point.x-4,point.y-4,8,8);
+      ctx.save();ctx.shadowColor='#9de1bc';ctx.shadowBlur=6;
+      const scale=transform.pixelsPerCell/.25;
+      if(track.kind==='PED'){ctx.beginPath();ctx.arc(point.x,point.y,Math.max(3,scale*.3),0,Math.PI*2);ctx.stroke();}
+      else {const w=Math.max(6,(track.width??1)*scale),h=Math.max(9,(track.length??2)*scale);ctx.strokeRect(point.x-w/2,point.y-h/2,w,h);ctx.fillStyle='#b4ddd9';ctx.fillRect(point.x-w*.3,point.y-h*.3,w*.6,h*.4);}
+      // Render supplied points only; no client-side trajectory inference.
+      if(Array.isArray(track.predicted_path) && track.predicted_path.length>1){ctx.beginPath();ctx.moveTo(point.x,point.y);for(const xy of track.predicted_path){if(xy.length!==2 || !xy.every(Number.isFinite))continue;const p=transform.worldToScreen(...xy);ctx.lineTo(p.x,p.y);}ctx.globalAlpha=.55;ctx.lineJoin='round';ctx.stroke();}
+      ctx.restore();
       if (!track.label) continue;
-      const text = `${track.label} · ${track.speed.toFixed(1)} m/s`;
+      const text = `${track.label} | ${track.speed.toFixed(1)} m/s`;
       const tagWidth = ctx.measureText(text).width + 8;
       if (tagWidth > width) continue;
       const x = Math.max(0, Math.min(point.x + 7, width - tagWidth));
@@ -295,7 +302,9 @@ function draw(now){
         break;
       }
     }
-    const ego=transform.worldToScreen(0,0);ctx.fillStyle='#c9e4ee';ctx.beginPath();ctx.arc(ego.x,ego.y,4,0,Math.PI*2);ctx.fill();
+    const ego=transform.worldToScreen(0,0);ctx.save();ctx.strokeStyle='#93bfd32b';ctx.lineWidth=1;
+    for(const radius of [10,20,30]){ctx.beginPath();ctx.arc(ego.x,ego.y,radius*transform.pixelsPerCell/.25,0,Math.PI*2);ctx.stroke();}
+    ctx.translate(ego.x,ego.y);ctx.shadowColor='#c5fff0';ctx.shadowBlur=16;ctx.fillStyle='#d7f8ee';ctx.beginPath();ctx.roundRect(-6,-10,12,20,4);ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='#244658';ctx.fillRect(-4,-5,8,5);ctx.fillRect(-8,-6,2,12);ctx.fillRect(6,-6,2,12);ctx.restore();
     if (mode === 'split') {
       ctx.strokeStyle='#9fdaed';ctx.beginPath();ctx.moveTo(divider,0);ctx.lineTo(divider,height);ctx.stroke();
     }

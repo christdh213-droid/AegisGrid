@@ -754,3 +754,5 @@ Separate stress transition: 48.10 ms before, 66.94 ms first stress frame, 61.00 
 Implemented exact view labels, elevation mode, dock-aware contain transform with eased recentering, glass fallback/reduced motion, and low-FPS lite mode (below 20 for 3 seconds). Baseline 50 tests passed; JS syntax checked. No pipeline changes.
 
 Session 6 step 3.2: four-pixel click/pan distinction, pinch zoom, H toggle, client-side typed-array tooltip. Fixed raster has only quantized max Z, so min Z and risk are explicitly unavailable there. No invented fixed measurements; adaptive inspection shows all received fields. JS syntax checked.
+
+Session 6 step 3.3: polished unclipped route ribbon, pulsing goal (static under reduced motion), 10/20/30 m rings, ego silhouette, class markers and nonoverlapping tags. Optional incoming predicted_path is drawn as supplied with round joins; this branch does not generate forecasts or route on individual predictions. JS syntax checked.

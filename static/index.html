@@ -9,18 +9,18 @@
   <canvas id="rightCanvas" aria-label="Baseline and adaptive LiDAR map"></canvas>
   <canvas id="leftCanvas" hidden width="256" height="256"></canvas>
   <header>
-    <div class="glass identity"><div class="mark" aria-hidden="true">◈</div><div><div class="eyebrow">SIH26053 / DRDO</div><strong>Adaptive LiDAR</strong></div></div>
+    <div class="glass identity"><div class="mark" aria-hidden="true">◈</div><div><div class="eyebrow">SIH26053 / DRDO</div><strong>Adaptive 2.5D LiDAR</strong></div></div>
     <nav class="glass modes" aria-label="Map mode">
-      <button data-mode="split" aria-pressed="true">Split wipe</button>
-      <button data-mode="baseline" aria-pressed="false">Baseline</button>
-      <button data-mode="adaptive" aria-pressed="false">Adaptive</button>
-      <button data-mode="risk" aria-pressed="false">Risk</button>
+      <button data-mode="split" aria-pressed="true">Split Wipe</button>
+      <button data-mode="elevation" aria-pressed="false">Elevation</button>
+      <button data-mode="quadtree" aria-pressed="false">Quadtree</button>
+      <button data-mode="risk" aria-pressed="false">Traversability</button>
     </nav>
-    <div class="glass live-tools"><span id="connection" role="status">Connecting</span><button id="upload">Upload LiDAR</button><input id="file" type="file" accept=".bin,.csv" hidden></div>
+    <div class="glass live-tools"><span id="connection" role="status">Connecting</span><button id="hideHud" aria-expanded="true" aria-controls="telemetry">Hide HUD</button><button id="upload">Upload LiDAR</button><input id="file" type="file" accept=".bin,.csv" hidden></div>
   </header>
-  <div class="labels"><span id="baselineLabel">Baseline · 0.25 m grid</span><span id="adaptiveLabel">Adaptive quadtree</span></div>
-  <button id="wipe" aria-label="Move split divider" title="Drag or use left/right arrows">↔</button>
-  <aside class="glass telemetry" aria-label="Telemetry and perception settings">
+  <div class="labels"><span id="baselineLabel">Baseline Fixed 0.25m Grid - 65,536 cells</span><span id="adaptiveLabel">Adaptive quadtree</span></div>
+  <button id="wipe" aria-label="Move split divider" title="Drag or use left/right arrows">&lt; &gt;</button>
+  <aside id="telemetry" class="glass telemetry" aria-label="Telemetry and perception settings">
     <div class="eyebrow">Live simulation</div>
     <h1>Telemetry</h1>
     <div id="fps">Render FPS —</div>
@@ -38,8 +38,8 @@
       <label class="setting">IMU levelling<input type="checkbox" data-config="imu_levelling_enabled" checked></label>
       <p id="perception"></p>
     </section>
-    <section aria-label="Risk legend">
-      <h2>Terrain risk</h2>
+    <section id="riskLegend" aria-label="Traversability legend" hidden>
+      <h2>Traversability</h2>
       <div id="riskBar" class="risk-bar" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
       <div class="legend">
         <span><i></i> Safe <b id="safe">—</b></span><span><i></i> Caution <b id="caution">—</b></span>

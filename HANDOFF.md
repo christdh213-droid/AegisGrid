@@ -749,3 +749,6 @@ Radio rates are estimated payload only, in decimal MB/s, at the rolling server f
 | CPU Load Spike Stress Test | 0.001927 | 0 | 86.404% | 90.349% | 70.24 ms | BUDGET_LOCKED |
 
 Separate stress transition: 48.10 ms before, 66.94 ms first stress frame, 61.00 ms median of the last 12 of 35 stress frames at BUDGET_LOCKED. The real 18 ms budget was not achieved. The deterministic load model passes spike detection within three frames, convergence inside the achievable budget, and no oscillation. Also tested L0 protection, stress work scaling, threshold ceilings, wire telemetry and all profile golden limits. pytest -v passed 50/50 in 12.28 s, one existing warning. Browser port 8766 stayed LIVE through CPU Stress selection and playback, reaching BUDGET_LOCKED with the ceiling warning and estimated radio readout. Temporary preview closed and server stopped. Port 8000 still serves the previously started build. Existing untracked _diag.py retained. No mixed dust/tilt stress matrix was run. Latest allowance 95% five-hour / 67% weekly.
+
+## Session progress — Session 6 step 3.1
+Implemented exact view labels, elevation mode, dock-aware contain transform with eased recentering, glass fallback/reduced motion, and low-FPS lite mode (below 20 for 3 seconds). Baseline 50 tests passed; JS syntax checked. No pipeline changes.

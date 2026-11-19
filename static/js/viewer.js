@@ -4,7 +4,11 @@ import {readLocalScan} from './localScan.js';
 const $=id=>document.getElementById(id),canvas=$('rightCanvas'),ctx=canvas.getContext('2d');
 const raster=$('leftCanvas'),rctx=raster.getContext('2d'),transform=new Transform();
 let latest=null,socket=null,retry=500,polling=false,pollTimer=null,wipe=.5,drag=null,playing=false;
-let mode = 'split';
+let mode = 'split', hudHidden = false, lowFpsSince = null;
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+function mapWidth(){ return innerWidth - (!hudHidden && innerWidth > 820 ? 366 : 0); }
+function toggleHud(){ hudHidden=!hudHidden; $('telemetry').hidden=hudHidden; $('hideHud').textContent=hudHidden?'Show HUD':'Hide HUD'; $('hideHud').setAttribute('aria-expanded',String(!hudHidden)); document.body.classList.toggle('hud-hidden',hudHidden); }
+$('hideHud').onclick=toggleHud;
 let localScan = false;
 const localRaster = document.createElement('canvas');
 localRaster.width = localRaster.height = GRID.dim;
@@ -16,7 +20,7 @@ window.viewerDiagnostics={renderFps:null,receivedFps:null,latencyMs:null,framesR
 const palette=['#cf9269','#74b4ac','#4f9eab','#265779','#152c51'];
 const riskPalette = ['#378c75','#c79851','#b65158','#344759'];
 const lut=Array.from({length:256},(_,i)=>i===0?[6,8,16]:[Math.round(25+156*i/255),Math.round(10+35*i/255),Math.round(22+35*i/255)]);
-function resize(){const dpr=devicePixelRatio||1;canvas.width=Math.round(innerWidth*dpr);canvas.height=Math.round(innerHeight*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);transform.resize(innerWidth,innerHeight);}
+function resize(){const dpr=devicePixelRatio||1;canvas.width=Math.round(innerWidth*dpr);canvas.height=Math.round(innerHeight*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);transform.resize(mapWidth(),innerHeight);}
 addEventListener('resize',resize);resize();
 function showError(error){$('error').textContent=String(error);window.viewerDiagnostics.errors.push(String(error));}
 function updateConnection(text, live = false) {
@@ -25,9 +29,11 @@ function updateConnection(text, live = false) {
 }
 function setMode(value) {
   mode = value;
+  $('riskLegend').hidden = mode !== 'risk';
+  document.querySelector('.modes').style.setProperty('--active', ['split','elevation','quadtree','risk'].indexOf(mode));
   $('wipe').hidden = mode !== 'split' || localScan;
-  $('baselineLabel').hidden = !localScan && !['split', 'baseline'].includes(mode);
-  $('adaptiveLabel').hidden = localScan || mode === 'baseline';
+  $('baselineLabel').hidden = !localScan && !mode === 'split';
+  $('adaptiveLabel').hidden = localScan || false;
   document.querySelectorAll('[data-mode]').forEach(button => {
     button.setAttribute('aria-pressed', String(!localScan && button.dataset.mode === mode));
   });
@@ -206,6 +212,7 @@ handle.onkeydown=event=>{if(['ArrowLeft','ArrowRight'].includes(event.key)){even
 addEventListener('keydown',event=>{if(event.target.matches('button,select,input'))return;if(event.key==='0')transform.reset();if(event.code==='Space'){event.preventDefault();command({action:playing?'pause':'play'});}if(event.key==='ArrowRight')command({action:'step'});});
 function draw(now){
   const width=innerWidth,height=innerHeight,divider=width*wipe;
+  const targetWidth=mapWidth(); transform.resize(reducedMotion.matches?targetWidth:transform.width+(targetWidth-transform.width)*.12,height);
   ctx.fillStyle='#050811';ctx.fillRect(0,0,width,height);
   if(localScan) {
     const extent = transform.extentRect();
@@ -213,14 +220,14 @@ function draw(now){
     ctx.drawImage(localRaster,extent.x,extent.y,extent.width,extent.height);
   } else if(latest){
     const extent=transform.extentRect();
-    if (mode === 'split' || mode === 'baseline') {
+    if (mode === 'split' || false) {
     ctx.save();ctx.beginPath();ctx.rect(0,0,mode === 'split' ? divider : width,height);ctx.clip();ctx.imageSmoothingEnabled=false;ctx.drawImage(raster,extent.x,extent.y,extent.width,extent.height);
     if(transform.pixelsPerCell>=6){ctx.strokeStyle='#49303a';ctx.lineWidth=.5;ctx.beginPath();for(let i=0;i<=GRID.dim;i++){const a=transform.gridToScreen(i,0),b=transform.gridToScreen(i,GRID.dim),c=transform.gridToScreen(0,i),d=transform.gridToScreen(GRID.dim,i);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.moveTo(c.x,c.y);ctx.lineTo(d.x,d.y);}ctx.stroke();}ctx.restore();
     }
-    if (mode !== 'baseline') {
+    if (true) {
     const left = mode === 'split' ? divider : 0;
     ctx.save();ctx.beginPath();ctx.rect(left,0,width-left,height);ctx.clip();
-    for(let i=0;i<latest.n;i++){const r=transform.cellRect(latest.x[i],latest.y[i],latest.level[i]);ctx.fillStyle=mode === 'risk' ? riskPalette[(latest.flags[i] >> 1) & 3] : palette[latest.level[i]];ctx.fillRect(r.x,r.y,r.width,r.height);if(r.width>=4){ctx.strokeStyle='#668198';ctx.lineWidth=.4;ctx.strokeRect(r.x,r.y,r.width,r.height);}}ctx.restore();
+    for(let i=0;i<latest.n;i++){const r=transform.cellRect(latest.x[i],latest.y[i],latest.level[i]);ctx.fillStyle=mode === 'risk' ? riskPalette[(latest.flags[i] >> 1) & 3] : mode === 'elevation' ? `rgb(${lut[Math.max(1,Math.min(255,Math.round((latest.zMax[i]/100+2)*254/8)+1))].join(',')})` : palette[latest.level[i]];ctx.fillRect(r.x,r.y,r.width,r.height);if(r.width>=4){ctx.strokeStyle='rgba(148,197,255,0.18)';ctx.lineWidth=.4;ctx.strokeRect(r.x,r.y,r.width,r.height);}}ctx.restore();
     }
     // World overlays intentionally sit outside both wipe clips.
     const route = latest.meta.extras;
@@ -274,7 +281,7 @@ function draw(now){
     }
     drawCount++;
   }
-  if(now-lastStats>=1000){const seconds=(now-lastStats)/1000;const fps=drawCount/seconds;receivedHz=received/seconds;$('fps').textContent=`Render ${fps.toFixed(1)} FPS · Received ${receivedHz.toFixed(1)} Hz`;Object.assign(window.viewerDiagnostics,{renderFps:fps,receivedFps:receivedHz});drawCount=0;received=0;lastStats=now;}
+  if(now-lastStats>=1000){const seconds=(now-lastStats)/1000;const fps=drawCount/seconds;receivedHz=received/seconds;$('fps').textContent=`Render ${fps.toFixed(1)} FPS · Received ${receivedHz.toFixed(1)} Hz`;Object.assign(window.viewerDiagnostics,{renderFps:fps,receivedFps:receivedHz}); if(socket?.readyState===1)updateConnection(`LIVE ${fps.toFixed(0)} FPS`,true); if(fps<20 && latest){lowFpsSince ??= now; if(now-lowFpsSince>=3000)document.body.classList.add('lite');}else lowFpsSince=null;drawCount=0;received=0;lastStats=now;}
   requestAnimationFrame(draw);
 }
 connect();setTimeout(()=>{if(socket?.readyState!==1)fallback();},1500);requestAnimationFrame(draw);

@@ -105,3 +105,8 @@ small { color:#bfd1df; font-size:10px; }
 .warning { color:#ffd08a!important; }
 #routeStatus { color:#9aefd3; } #routeStatus[data-status=BLOCKED],#routeStatus[data-status=REROUTING] { color:#ffd08a; }
 #governorProfile { width:100%; } select option { background:#142135; }
+
+#goalForm { display:flex; flex-wrap:wrap; align-items:end; gap:8px; font-size:11px; }
+#goalForm label { flex:1; } #goalForm input { display:block; width:85px; padding:6px; background:#142135; border:1px solid #607b90; color:#effaff; border-radius:6px; }
+:focus-visible { outline:2px solid #a2ffdd; outline-offset:3px; }
+button:disabled,input:disabled,select:disabled { opacity:.5; cursor:default; }

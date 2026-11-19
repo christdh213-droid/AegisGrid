@@ -155,7 +155,7 @@ async function command(message){
   if(socket?.readyState===1){socket.send(JSON.stringify(message));return;}
   try{const response=await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(message)});const result=await response.json();if(!response.ok)throw Error(result.detail);playing=result.playing;if(result.config)syncControls(result.config);if(['step','reset','set_goal'].includes(message.action)){const frame=await fetch('/api/frame',{headers:{Accept:'application/octet-stream'}});receive(await frame.arrayBuffer());}}catch(error){showError(error);}
 }
-for(const action of ['play','pause','step','reset'])$(action).onclick=()=>{if(action==='reset'){transform.reset();wipe=.5;$('wipe').style.left='50%';}command({action});};
+for(const action of ['play','pause','step','reset'])$(action).onclick=()=>{if(action==='reset'){trackLabels.clear();labelCounts.VEH=labelCounts.PED=0;transform.reset();wipe=.5;$('wipe').style.left='50%';}command({action});};
 $('home').onclick=()=>transform.reset();$('speed').onchange=event=>command({action:'configure',settings:{speed:Number(event.target.value)}});
 const configToggles = [...document.querySelectorAll('[data-config]')];
 function syncControls(config) {
@@ -171,17 +171,20 @@ function syncControls(config) {
   for(const axis of ['pitch','roll'])if(document.activeElement!==$(axis)){$(axis).value=config[axis+'_deg'];$(axis+'Value').textContent=`${config[axis+'_deg']}°`;}
 
   $('governorProfile').value = config.governor_profile ?? 'Unrestricted';
-  for (const toggle of configToggles) toggle.checked = Boolean(config[toggle.dataset.config]);
+  for (const toggle of configToggles) {toggle.checked = Boolean(config[toggle.dataset.config]);toggle.setAttribute('aria-checked',String(toggle.checked));}
   if (document.activeElement !== $('dust')) {
     $('dust').value = String(Math.round(config.outlier_ratio * 100));
     $('dustValue').textContent = `${$('dust').value}%`;
   }
 }
+$('goalForm').onsubmit=event=>{event.preventDefault();command({action:'set_goal',goal_xy:[Number($('goalX').value),Number($('goalY').value)]});};
+const modeButtons=[...document.querySelectorAll('[data-mode]')];
+for(const [i,button] of modeButtons.entries())button.onkeydown=event=>{let j;if(event.key==='ArrowRight')j=(i+1)%4;else if(event.key==='ArrowLeft')j=(i+3)%4;else if(event.key==='Home')j=0;else if(event.key==='End')j=3;else return;event.preventDefault();modeButtons[j].focus();modeButtons[j].click();};
 $('tiltMode').onchange=event=>command({action:'configure',settings:{tilt_mode:event.target.value}});
 for(const axis of ['pitch','roll']){$(axis).oninput=()=>$(axis+'Value').textContent=`${$(axis).value}°`;$(axis).onchange=()=>command({action:'configure',settings:{[axis+'_deg']:Number($(axis).value)}});}
 $('governorProfile').onchange = event => command({action:'set_profile',profile:event.target.value});
 for (const toggle of configToggles) {
-  toggle.onchange = () => command({action:'configure',settings:{[toggle.dataset.config]:toggle.checked}});
+  toggle.onchange = () => {toggle.setAttribute('aria-checked',String(toggle.checked));command({action:'configure',settings:{[toggle.dataset.config]:toggle.checked}});};
 }
 $('dust').oninput = () => { $('dustValue').textContent = `${$('dust').value}%`; };
 $('dust').onchange = () => command({action:'configure',settings:{outlier_ratio:Number($('dust').value)/100}});
@@ -231,18 +234,18 @@ handle.onpointerdown=event=>{wiping=true;handle.setPointerCapture(event.pointerI
 handle.onpointermove=event=>{if(wiping){wipe=Math.max(.02,Math.min(.98,event.clientX/innerWidth));handle.style.left=`${wipe*100}%`;}};
 handle.onpointerup=handle.onpointercancel=()=>wiping=false;
 handle.onkeydown=event=>{if(['ArrowLeft','ArrowRight'].includes(event.key)){event.preventDefault();wipe=Math.max(.02,Math.min(.98,wipe+(event.key==='ArrowLeft'?-.02:.02)));handle.style.left=`${wipe*100}%`;}};
-addEventListener('keydown',event=>{if(event.target.matches('button,select,input'))return;if(event.key.toLowerCase()==='h')toggleHud();if(event.key==='0')transform.reset();if(event.code==='Space'){event.preventDefault();command({action:playing?'pause':'play'});}if(event.key==='ArrowRight')command({action:'step'});});
+addEventListener('keydown',event=>{if(event.target.matches('button,select,input,textarea') || event.target.isContentEditable)return;if(event.key.toLowerCase()==='h')toggleHud();if(event.key==='0')transform.reset();if(event.code==='Space'){event.preventDefault();command({action:playing?'pause':'play'});}if(event.key==='ArrowRight')command({action:'step'});});
 function draw(now){
   const width=innerWidth,height=innerHeight,divider=width*wipe;
   const targetWidth=mapWidth(); transform.resize(reducedMotion.matches?targetWidth:transform.width+(targetWidth-transform.width)*.12,height);
   ctx.fillStyle='#050811';ctx.fillRect(0,0,width,height);
   if(latest){
     const extent=transform.extentRect();
-    if (mode === 'split' || false) {
+    if (mode === 'split') {
     ctx.save();ctx.beginPath();ctx.rect(0,0,mode === 'split' ? divider : width,height);ctx.clip();ctx.imageSmoothingEnabled=false;ctx.drawImage(raster,extent.x,extent.y,extent.width,extent.height);
     if(transform.pixelsPerCell>=6){ctx.strokeStyle='#49303a';ctx.lineWidth=.5;ctx.beginPath();for(let i=0;i<=GRID.dim;i++){const a=transform.gridToScreen(i,0),b=transform.gridToScreen(i,GRID.dim),c=transform.gridToScreen(0,i),d=transform.gridToScreen(GRID.dim,i);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.moveTo(c.x,c.y);ctx.lineTo(d.x,d.y);}ctx.stroke();}ctx.restore();
     }
-    if (true) {
+    {
     const left = mode === 'split' ? divider : 0;
     ctx.save();ctx.beginPath();ctx.rect(left,0,width-left,height);ctx.clip();
     for(let i=0;i<latest.n;i++){const r=transform.cellRect(latest.x[i],latest.y[i],latest.level[i]);ctx.fillStyle=mode === 'risk' ? riskPalette[(latest.flags[i] >> 1) & 3] : mode === 'elevation' ? `rgb(${lut[Math.max(1,Math.min(255,Math.round((latest.zMax[i]/100+2)*254/8)+1))].join(',')})` : palette[latest.level[i]];ctx.fillRect(r.x,r.y,r.width,r.height);if(r.width>=4){ctx.strokeStyle='rgba(148,197,255,0.18)';ctx.lineWidth=.4;ctx.strokeRect(r.x,r.y,r.width,r.height);}}ctx.restore();

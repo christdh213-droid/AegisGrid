@@ -6,7 +6,7 @@
   <link rel="stylesheet" href="/static/viewer.css">
 </head>
 <body>
-  <canvas id="rightCanvas" aria-label="Baseline and adaptive LiDAR map"></canvas>
+  <canvas id="rightCanvas" tabindex="0" aria-label="LiDAR map. Drag to pan, pinch or scroll to zoom. Use goal coordinates in the dock for keyboard destination entry."></canvas>
   <canvas id="leftCanvas" hidden width="256" height="256"></canvas>
   <header>
     <div class="glass identity"><div class="mark" aria-hidden="true">◈</div><div><div class="eyebrow">SIH26053 / DRDO</div><strong>Adaptive 2.5D LiDAR</strong></div></div>
@@ -29,14 +29,14 @@
       <div><span>Memory saved (est.)</span><strong id="memory">—</strong></div>
     </div>
     <svg id="latencyChart" viewBox="0 0 280 45" role="img" aria-label="Mapping latency history: adaptive cyan, fixed amber"><polyline id="adaptiveLine"/><polyline id="fixedLine"/></svg><small>Mapping latency · adaptive / fixed (ms)</small>
-    <div class="chips"><span id="rmseChip"></span><span id="ghostChip"></span></div><p id="metrics">Waiting for frame</p>
+    <div class="chips"><span id="rmseChip"></span><span id="ghostChip"></span></div><p id="radioRate" hidden></p><p id="metrics">Waiting for frame</p>
     <section>
       <h2>Perception</h2>
-      <label class="setting">Dust &amp; Rain Filter (SOR)<input type="checkbox" data-config="sor_enabled" checked></label>
+      <label class="setting">Dust &amp; Rain Filter (SOR)<input type="checkbox" role="switch" aria-checked="false" data-config="sor_enabled" checked></label>
       <div id="dustControls"><label class="setting">Dust injection <output id="dustValue">0%</output></label>
       <input aria-label="Dust injection" type="range" min="0" max="15" value="0" id="dust"></div>
-      <label class="setting">Simulate Hill Tilt<input type="checkbox" data-config="simulate_hill_tilt"></label>
-      <label class="setting">IMU Slope Levelling<input type="checkbox" data-config="imu_levelling_enabled" checked></label>
+      <label class="setting">Simulate Hill Tilt<input type="checkbox" role="switch" aria-checked="false" data-config="simulate_hill_tilt"></label>
+      <label class="setting">IMU Slope Levelling<input type="checkbox" role="switch" aria-checked="false" data-config="imu_levelling_enabled" checked></label>
       <div id="tiltControls" hidden><label class="setting">Tilt mode<select id="tiltMode"><option>Auto</option><option>Manual</option></select></label><div id="manualTilt" hidden><label>Pitch <output id="pitchValue">0°</output><input id="pitch" aria-label="Pitch degrees" type="range" min="-8" max="8" step="0.5" value="0"></label><label>Roll <output id="rollValue">0°</output><input id="roll" aria-label="Roll degrees" type="range" min="-8" max="8" step="0.5" value="0"></label></div></div><span id="uncompensated" class="warning" hidden>UNCOMPENSATED</span><p id="perception"></p>
     </section>
     <section id="riskLegend" aria-label="Traversability legend" hidden>
@@ -48,9 +48,9 @@
       </div>
     </section>
     <section aria-label="Path planner">
-      <label class="setting">A* Auto-Path Planner<input type="checkbox" data-config="planner_enabled" checked></label>
+      <label class="setting">A* Auto-Path Planner<input type="checkbox" role="switch" aria-checked="false" data-config="planner_enabled" checked></label>
       <p id="routeStatus" role="status">Click the map to set a destination.</p>
-      <p id="pathTime"></p><p id="routeCompare" hidden></p>
+      <form id="goalForm"><label>Goal X (m)<input id="goalX" type="number" min="-32" max="32" step="0.25" value="-10" required></label><label>Goal Y (m)<input id="goalY" type="number" min="-32" max="32" step="0.25" value="8" required></label><button>Set goal</button></form><p id="pathTime"></p><p id="routeCompare" hidden></p>
     </section>
     <section aria-label="Compute budget">
       <label class="setting" for="governorProfile">Compute Budget Autopilot</label>
@@ -61,7 +61,7 @@
         <option value="CPU Load Spike Stress Test">CPU Stress Test</option>
       </select>
       <p id="governorReadout" role="status"></p>
-      <p id="radioRate" hidden></p>
+
     </section>
   </aside>
   <footer class="glass">

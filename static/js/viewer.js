@@ -110,6 +110,15 @@ function receive(buffer){
       const savings = e.nodes_saved_pct == null ? '' : ` · ${e.nodes_saved_pct.toFixed(1)}% fewer nodes`;
       $('routeCompare').textContent = `Fixed sample: ${e.fixed_grid_nodes_expanded} nodes · ${e.fixed_plan_ms.toFixed(1)} ms · ${e.fixed_sample_age_s.toFixed(1)} s old${savings}`;
     }
+    if (e.governor_mode) {
+      const scale = e.governor_mode === 'Unrestricted' ? 'Host compute' : 'Emulated edge profile (host-scaled)';
+      const warning = e.governor_state === 'BUDGET_LOCKED' ? ' · Budget unmet at threshold ceilings' : '';
+      $('governorReadout').textContent = `${scale} · ${e.governor_state} · ${e.governed_latency_ms.toFixed(1)} / ${e.target_budget_ms} ms · Height / gradient ${e.active_merge_threshold.toFixed(2)} / ${e.active_gradient_threshold.toFixed(2)} m${warning}`;
+      $('radioRate').hidden = e.radio_mb_s_fixed == null || e.radio_mb_s_adaptive == null;
+      if (!$('radioRate').hidden) {
+        $('radioRate').textContent = `Estimated map radio · Fixed ${e.radio_mb_s_fixed.toFixed(2)} / adaptive ${e.radio_mb_s_adaptive.toFixed(2)} MB/s`;
+      }
+    }
     if(e.safe_pct != null){
       $('perception').textContent = `Filtered ${e.filtered_noise_points} points · IMU ${e.imu_pitch_deg.toFixed(1)}° / ${e.imu_roll_deg.toFixed(1)}°${e.tilt_corrected ? ' (levelled)' : ''}`;
       ['safe','caution','hazard','unknown'].forEach((key, i) => {
@@ -155,12 +164,14 @@ $('home').onclick=()=>transform.reset();$('speed').onchange=event=>command({acti
 const configToggles = [...document.querySelectorAll('[data-config]')];
 function syncControls(config) {
   $('speed').value = String(config.speed);
+  $('governorProfile').value = config.governor_profile ?? 'Unrestricted';
   for (const toggle of configToggles) toggle.checked = Boolean(config[toggle.dataset.config]);
   if (document.activeElement !== $('dust')) {
     $('dust').value = String(Math.round(config.outlier_ratio * 100));
     $('dustValue').textContent = `${$('dust').value}%`;
   }
 }
+$('governorProfile').onchange = event => command({action:'set_profile',profile:event.target.value});
 for (const toggle of configToggles) {
   toggle.onchange = () => command({action:'configure',settings:{[toggle.dataset.config]:toggle.checked}});
 }

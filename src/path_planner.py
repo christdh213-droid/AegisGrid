@@ -275,7 +275,7 @@ class OccupancyPlanner:
         self.last_nodes = None
         self.snapshot = None
 
-    def update(self, ids, columns, goal_request, now=None):
+    def update(self, ids, columns, goal_request, now=None, replan_interval_s=.1, sample_fixed=True):
         clock = time.perf_counter
         start = clock()
         now = start if now is None else now
@@ -290,7 +290,7 @@ class OccupancyPlanner:
         ))
         invalidated = bool(self.path and self.reason is None and not previous_valid)
         search_ms = nodes = None
-        if changed or invalidated or now - self.last_plan >= .1:
+        if changed or invalidated or now - self.last_plan >= replan_interval_s:
             self.request, self.last_plan = requested, now
             # A leaf is usable only if all of its constituent cells are clear.
             # This avoids disconnecting a partially inflated leaf internally.
@@ -359,12 +359,18 @@ class OccupancyPlanner:
             "plan_time_ms": elapsed, "nodes_expanded": nodes,
             "adaptive_plan_ms": search_ms, "adaptive_nodes_expanded": nodes,
         }
-        if self.comparison is not None:
-            result.update(self.comparison.update(now, (self.generation, requested), self.last_nodes, self.snapshot))
-            fixed_nodes = result.get("fixed_grid_nodes_expanded")
-            compared = self.comparison.sample_adaptive_nodes
-            if fixed_nodes and compared is not None:
-                result["nodes_saved_pct"] = 100. * (1. - compared / fixed_nodes)
+        if sample_fixed:
+            result.update(self.sample_fixed_grid(now))
+        return result
+
+    def sample_fixed_grid(self, now):
+        if self.comparison is None:
+            return {}
+        result = self.comparison.update(now, (self.generation, self.request), self.last_nodes, self.snapshot)
+        fixed_nodes = result.get("fixed_grid_nodes_expanded")
+        compared = self.comparison.sample_adaptive_nodes
+        if fixed_nodes and compared is not None:
+            result["nodes_saved_pct"] = 100. * (1. - compared / fixed_nodes)
         return result
 
     @staticmethod

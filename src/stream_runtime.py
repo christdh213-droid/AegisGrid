@@ -8,14 +8,14 @@ import threading
 import time
 from collections import deque
 
-from src.config import PipelineConfig, RuntimeConfig
+from src.config import GOVERNOR_PROFILES, PipelineConfig, RuntimeConfig
+from src.compute_governor import ComputeGovernor
 from src.data_source import SyntheticLidarStream
 from src.pipeline import PerceptionPipeline
 from src.path_planner import FixedGridComparison, OccupancyPlanner
 from src.hooks import DefaultPostMapHook
 from src.stream_protocol import encode_frame, quantize_elevation
 
-PROFILES = ('Unrestricted', 'Tactical Edge ECU', 'Low-Power UGV Node', 'CPU Load Spike Stress Test')
 MODES = ('Split Wipe', 'Elevation', 'Quadtree', 'Traversability')
 
 
@@ -34,7 +34,7 @@ def updated_config(config, updates):
             lo, hi = ranges[key]
             if type(value) not in (float, int) or not math.isfinite(value) or not lo <= value <= hi:
                 raise ValueError(f'{key} must be in [{lo}, {hi}]')
-        if key == 'governor_profile' and value not in PROFILES:
+        if key == 'governor_profile' and (not isinstance(value, str) or value not in GOVERNOR_PROFILES):
             raise ValueError('Unknown governor profile')
         if key == 'view_mode' and value not in MODES:
             raise ValueError('Unknown view mode')
@@ -58,7 +58,9 @@ class StreamState:
         self.lock = threading.RLock()
         self.config = PipelineConfig()
         self.runtime = RuntimeConfig()
-        self.pipeline = PerceptionPipeline(self.config, perception=True)
+        self.governor = ComputeGovernor(self.config)
+        self.governor_settings = self.governor.select(self.runtime.governor_profile)
+        self.pipeline = PerceptionPipeline(self.config, perception=True, pre_map_hook=self._map_options)
         self.planner = OccupancyPlanner(self.config)
         self.stream = SyntheticLidarStream(self.config)
         self.is_playing = False
@@ -75,15 +77,33 @@ class StreamState:
         self.previous_encode_id = None
         self.subscribers = set()
 
+    def _map_options(self, fixed, _runtime):
+        # PRE_MAP runs before tracking this frame. The mapper separately
+        # receives the current dynamic mask from the pipeline tracker.
+        return self.governor.map_options(fixed, self.pipeline.tracker.prev_dynamic_mask, self.governor_settings)
+
     def _step(self):
         snapshot = self.runtime  # frozen, remains valid for the whole frame
         self.stream.runtime_config = snapshot
         points, metadata = next(self.stream)
         metadata['runtime_config'] = snapshot
+        self.governor_settings = self.governor.select(snapshot.governor_profile)
+        started = time.perf_counter()
         frame = self.pipeline.process_frame(points, metadata=metadata)
         if snapshot.planner_enabled:
             adaptive = self.pipeline.adaptive_map
-            frame.extras.update(self.planner.update(adaptive.leaf_id_grid, adaptive.leaf_arrays, snapshot.goal_xy))
+            frame.extras.update(self.planner.update(
+                adaptive.leaf_id_grid, adaptive.leaf_arrays, snapshot.goal_xy,
+                replan_interval_s=self.governor_settings.replan_interval_s, sample_fixed=False,
+            ))
+        compute_ms = (time.perf_counter() - started) * 1000
+        leaf_count = len(frame.adaptive_cells)
+        stress_ms = self.governor.inject_stress(leaf_count)
+        frame.extras.update(self.governor.observe(
+            compute_ms, stress_ms, self.governor_settings, leaf_count, self.server_fps(),
+        ))
+        if snapshot.planner_enabled:
+            frame.extras.update(self.planner.sample_fixed_grid(time.perf_counter()))
         frame.extras.update(runtime_config=snapshot.to_dict(), server_fps=self.server_fps(),
                             encode_ms=self.previous_encode, encode_frame_id=self.previous_encode_id)
         start = time.perf_counter()
@@ -117,6 +137,7 @@ class StreamState:
                 self.runtime = RuntimeConfig()
                 self.pipeline.reset()
                 self.planner.reset()
+                self.governor.reset()
                 self.stream.reset()
                 self.is_playing = False
                 self.target_fps = min(30.0, self.max_fps)
@@ -141,7 +162,8 @@ class StreamState:
                 if previous.planner_enabled != self.runtime.planner_enabled:
                     self.planner.reset()
                 if not self.is_playing and (previous.goal_xy != self.runtime.goal_xy
-                        or previous.planner_enabled != self.runtime.planner_enabled):
+                        or previous.planner_enabled != self.runtime.planner_enabled
+                        or previous.governor_profile != self.runtime.governor_profile):
                     self._step()
             else:
                 raise ValueError('Unknown action')

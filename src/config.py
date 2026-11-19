@@ -82,6 +82,23 @@ class PipelineConfig:
 
 
 @dataclass(frozen=True)
+class GovernorProfile:
+    budget_ms: float
+    cpu_scale: float
+    height_ceiling_m: float | None
+    gradient_ceiling_m: float | None
+    stress_ms: float = 0.0
+
+
+GOVERNOR_PROFILES = {
+    "Unrestricted": GovernorProfile(33., 1., None, None),
+    "Tactical Edge ECU": GovernorProfile(18., 2., .24, .18),
+    "Low-Power UGV Node": GovernorProfile(12., 3., .28, .22),
+    "CPU Load Spike Stress Test": GovernorProfile(18., 1., .28, .22, 12.),
+}
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     """Immutable between-frame settings; module switches are scaffolding in Session 1.
 

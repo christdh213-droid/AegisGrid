@@ -51,6 +51,17 @@
       <p id="routeStatus" role="status">Click the map to set a destination.</p>
       <p id="routeCompare" hidden></p>
     </section>
+    <section aria-label="Compute budget">
+      <label class="setting" for="governorProfile">Compute profile</label>
+      <select id="governorProfile">
+        <option value="Unrestricted">Unrestricted</option>
+        <option value="Tactical Edge ECU">Tactical Edge 18 ms</option>
+        <option value="Low-Power UGV Node">Low-Power ECU 12 ms</option>
+        <option value="CPU Load Spike Stress Test">CPU Stress Test</option>
+      </select>
+      <p id="governorReadout" role="status"></p>
+      <p id="radioRate" hidden></p>
+    </section>
   </aside>
   <footer class="glass">
     <button id="play">▶ Play</button><button id="pause">Pause</button><button id="step">Step</button><button id="reset">Reset</button>

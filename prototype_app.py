@@ -107,6 +107,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @asynccontextmanager
 async def lifespan(app):
+    state.open_comparison()
     task = asyncio.create_task(state.run())
     try:
         yield
@@ -114,6 +115,7 @@ async def lifespan(app):
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+        await asyncio.to_thread(state.close_comparison)
 
 app.router.lifespan_context = lifespan
 
@@ -126,8 +128,7 @@ async def control(message):
         ack = await asyncio.to_thread(state.execute, message)
     except (ValueError, TypeError) as error:
         raise HTTPException(400, str(error)) from error
-    if message.get("action") in ("step", "reset"):
-        state.publish()
+    state.publish()
     return ack
 
 async def frame_response(request):

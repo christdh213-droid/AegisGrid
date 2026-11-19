@@ -31,6 +31,7 @@ class FrameExtras(TypedDict, total=False):
     planned_path: list[list[float]] | None
     goal_xy: list[float] | None
     path_status: str | None
+    path_reason: str | None
     plan_time_ms: float | None
     nodes_expanded: int | None
     fixed_grid_nodes_expanded: int | None

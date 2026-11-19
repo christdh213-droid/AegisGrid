@@ -11,6 +11,7 @@ from collections import deque
 from src.config import PipelineConfig, RuntimeConfig
 from src.data_source import SyntheticLidarStream
 from src.pipeline import PerceptionPipeline
+from src.path_planner import FixedGridComparison, OccupancyPlanner
 from src.hooks import DefaultPostMapHook
 from src.stream_protocol import encode_frame, quantize_elevation
 
@@ -51,13 +52,14 @@ class StreamState:
         self.max_fps = float(os.environ.get("MAX_FPS", "30"))
         if not math.isfinite(self.max_fps) or self.max_fps < 1:
             raise ValueError("MAX_FPS must be a finite number of at least 1")
-        self.disable_process_pool = os.environ.get("DISABLE_PROCESS_POOL", "1").strip().lower() in {
+        self.disable_process_pool = os.environ.get("DISABLE_PROCESS_POOL", "0").strip().lower() in {
             "1", "true", "yes", "on",
         }
         self.lock = threading.RLock()
         self.config = PipelineConfig()
         self.runtime = RuntimeConfig()
         self.pipeline = PerceptionPipeline(self.config, perception=True)
+        self.planner = OccupancyPlanner(self.config)
         self.stream = SyntheticLidarStream(self.config)
         self.is_playing = False
         self.target_fps = min(30.0, self.max_fps)
@@ -79,6 +81,9 @@ class StreamState:
         points, metadata = next(self.stream)
         metadata['runtime_config'] = snapshot
         frame = self.pipeline.process_frame(points, metadata=metadata)
+        if snapshot.planner_enabled:
+            adaptive = self.pipeline.adaptive_map
+            frame.extras.update(self.planner.update(adaptive.leaf_id_grid, adaptive.leaf_arrays, snapshot.goal_xy))
         frame.extras.update(runtime_config=snapshot.to_dict(), server_fps=self.server_fps(),
                             encode_ms=self.previous_encode, encode_frame_id=self.previous_encode_id)
         start = time.perf_counter()
@@ -111,6 +116,7 @@ class StreamState:
             if action == 'reset':
                 self.runtime = RuntimeConfig()
                 self.pipeline.reset()
+                self.planner.reset()
                 self.stream.reset()
                 self.is_playing = False
                 self.target_fps = min(30.0, self.max_fps)
@@ -130,14 +136,30 @@ class StreamState:
                 self.target_fps = max(1., min(30., self.max_fps, float(fps)))
             elif action in ('configure', 'set_goal', 'set_profile'):
                 updates = message.get('settings', {}) if action == 'configure' else ({'goal_xy': message.get('goal_xy')} if action == 'set_goal' else {'governor_profile': message.get('profile')})
-                self.runtime = updated_config(self.runtime, updates)
+                previous = self.runtime
+                self.runtime = updated_config(previous, updates)
+                if previous.planner_enabled != self.runtime.planner_enabled:
+                    self.planner.reset()
+                if not self.is_playing and (previous.goal_xy != self.runtime.goal_xy
+                        or previous.planner_enabled != self.runtime.planner_enabled):
+                    self._step()
             else:
                 raise ValueError('Unknown action')
             if self.current_frame is None:
                 self._step()
             return dict(type='control_ack', action=action, playing=self.is_playing,
                         config=self.runtime.to_dict(), fps=self.target_fps,
-                        modules_active=False)
+                        modules_active=True)
+
+    def open_comparison(self):
+        if not self.disable_process_pool:
+            self.planner.comparison = FixedGridComparison()
+
+    def close_comparison(self):
+        with self.lock:
+            if self.planner.comparison is not None:
+                self.planner.comparison.close()
+                self.planner.comparison = None
 
     def tick(self):
         with self.lock:

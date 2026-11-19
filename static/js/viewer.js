@@ -103,6 +103,13 @@ function receive(buffer){
     $('memory').textContent = `${m.memory_saved_pct.toFixed(1)}%`;
     $('metrics').textContent = `Frame ${latest.frameId} · RMSE ${m.obstacle_rmse_m.toFixed(4)} m · Ghosts ${m.ghost_cells_detected} · Transport ${latency.toFixed(1)} ms`;
     if(e.runtime_config) syncControls(e.runtime_config);
+    $('routeStatus').textContent = localScan ? 'Return to live to set a destination.' :
+      (e.path_status ? `${e.path_status}${e.path_reason ? ' · ' + e.path_reason : ''} · Click map to set goal` : 'Route planner is off');
+    $('routeCompare').hidden = e.fixed_plan_ms == null;
+    if (e.fixed_plan_ms != null) {
+      const savings = e.nodes_saved_pct == null ? '' : ` · ${e.nodes_saved_pct.toFixed(1)}% fewer nodes`;
+      $('routeCompare').textContent = `Fixed sample: ${e.fixed_grid_nodes_expanded} nodes · ${e.fixed_plan_ms.toFixed(1)} ms · ${e.fixed_sample_age_s.toFixed(1)} s old${savings}`;
+    }
     if(e.safe_pct != null){
       $('perception').textContent = `Filtered ${e.filtered_noise_points} points · IMU ${e.imu_pitch_deg.toFixed(1)}° / ${e.imu_roll_deg.toFixed(1)}°${e.tilt_corrected ? ' (levelled)' : ''}`;
       ['safe','caution','hazard','unknown'].forEach((key, i) => {
@@ -141,7 +148,7 @@ function connect(){
 }
 async function command(message){
   if(socket?.readyState===1){socket.send(JSON.stringify(message));return;}
-  try{const response=await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(message)});const result=await response.json();if(!response.ok)throw Error(result.detail);playing=result.playing;if(['step','reset'].includes(message.action)){const frame=await fetch('/api/frame',{headers:{Accept:'application/octet-stream'}});receive(await frame.arrayBuffer());}}catch(error){showError(error);}
+  try{const response=await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(message)});const result=await response.json();if(!response.ok)throw Error(result.detail);playing=result.playing;if(result.config)syncControls(result.config);if(['step','reset','set_goal'].includes(message.action)){const frame=await fetch('/api/frame',{headers:{Accept:'application/octet-stream'}});receive(await frame.arrayBuffer());}}catch(error){showError(error);}
 }
 for(const action of ['play','pause','step','reset'])$(action).onclick=()=>{if(action==='reset'){transform.reset();wipe=.5;$('wipe').style.left='50%';}command({action});};
 $('home').onclick=()=>transform.reset();$('speed').onchange=event=>command({action:'configure',settings:{speed:Number(event.target.value)}});
@@ -159,9 +166,25 @@ for (const toggle of configToggles) {
 }
 $('dust').oninput = () => { $('dustValue').textContent = `${$('dust').value}%`; };
 $('dust').onchange = () => command({action:'configure',settings:{outlier_ratio:Number($('dust').value)/100}});
-canvas.onpointerdown=event=>{drag={x:event.clientX,y:event.clientY};canvas.setPointerCapture(event.pointerId);};
-canvas.onpointermove=event=>{if(drag){transform.pan(event.clientX-drag.x,event.clientY-drag.y);drag={x:event.clientX,y:event.clientY};}};
-canvas.onpointerup=canvas.onpointercancel=()=>drag=null;
+canvas.onpointerdown=event=>{
+  if (event.button !== 0) return;
+  drag={x:event.clientX,y:event.clientY,moved:false};
+  canvas.setPointerCapture(event.pointerId);
+};
+canvas.onpointermove=event=>{
+  if (!drag) return;
+  if (!drag.moved && Math.hypot(event.clientX-drag.x,event.clientY-drag.y) <= 5) return;
+  transform.pan(event.clientX-drag.x,event.clientY-drag.y);
+  drag={x:event.clientX,y:event.clientY,moved:true};
+};
+canvas.onpointerup=event=>{
+  if (drag && !drag.moved && !localScan && latest?.meta.extras.runtime_config?.planner_enabled) {
+    const {x,y} = transform.screenToWorld(event.clientX,event.clientY);
+    command({action:'set_goal',goal_xy:[x,y]});
+  }
+  drag=null;
+};
+canvas.onpointercancel=()=>drag=null;
 canvas.onwheel=event=>{event.preventDefault();transform.zoomAt(Math.exp(-event.deltaY*.001),event.clientX,event.clientY);};
 canvas.ondblclick=()=>transform.reset();
 const handle=$('wipe');let wiping=false;
@@ -189,6 +212,27 @@ function draw(now){
     for(let i=0;i<latest.n;i++){const r=transform.cellRect(latest.x[i],latest.y[i],latest.level[i]);ctx.fillStyle=mode === 'risk' ? riskPalette[(latest.flags[i] >> 1) & 3] : palette[latest.level[i]];ctx.fillRect(r.x,r.y,r.width,r.height);if(r.width>=4){ctx.strokeStyle='#668198';ctx.lineWidth=.4;ctx.strokeRect(r.x,r.y,r.width,r.height);}}ctx.restore();
     }
     // World overlays intentionally sit outside both wipe clips.
+    const route = latest.meta.extras;
+    ctx.save();
+    if (route.planned_path?.length) {
+      ctx.beginPath();
+      route.planned_path.forEach(([x,y],i)=>{
+        const point=transform.worldToScreen(x,y);
+        if(i)ctx.lineTo(point.x,point.y);else ctx.moveTo(point.x,point.y);
+      });
+      const blocked = route.path_status === 'BLOCKED';
+      ctx.strokeStyle = blocked ? '#b6ac9590' : '#6ef5dc';
+      ctx.lineWidth = blocked ? 2 : 4;
+      if(blocked)ctx.setLineDash([7,8]);
+      ctx.stroke();
+    }
+    if (route.goal_xy) {
+      const goal=transform.worldToScreen(...route.goal_xy);
+      ctx.setLineDash([]);
+      ctx.strokeStyle = route.path_status === 'BLOCKED' ? '#ffc36e' : '#6ef5dc';
+      ctx.lineWidth=2;ctx.beginPath();ctx.arc(goal.x,goal.y,7,0,Math.PI*2);ctx.stroke();
+    }
+    ctx.restore();
     const occupiedTags = [];
     ctx.font = '11px ui-monospace,Consolas,monospace';
     for (const track of latest.displayTracks) {

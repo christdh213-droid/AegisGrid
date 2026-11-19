@@ -50,6 +50,9 @@ class PipelineConfig:
     caution_step_m: float = 0.15
     hazard_span_m: float = 0.35
     hazard_step_m: float = 0.35
+    planner_terrain_clearance_m: float = 0.9
+    planner_dynamic_clearance_m: float = 1.0
+    planner_default_goal: tuple[float, float] = (-10.0, 8.0)
     dt: float = 0.1
     seed: int = 42
 

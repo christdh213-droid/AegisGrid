@@ -16,7 +16,7 @@
       <button data-mode="quadtree" aria-pressed="false">Quadtree</button>
       <button data-mode="risk" aria-pressed="false">Traversability</button>
     </nav>
-    <div class="glass live-tools"><span id="connection" role="status">Connecting</span><button id="hideHud" aria-expanded="true" aria-controls="telemetry">Hide HUD</button><button id="upload">Upload LiDAR</button><input id="file" type="file" accept=".bin,.csv" hidden></div>
+    <div class="glass live-tools"><span id="connection" role="status">Connecting</span><button id="hideHud" aria-expanded="true" aria-controls="telemetry">Hide HUD</button><button id="upload">Upload LiDAR</button><input id="file" type="file" accept=".bin,.npy,.csv" hidden></div>
   </header>
   <div class="labels"><span id="baselineLabel">Baseline Fixed 0.25m Grid - 65,536 cells</span><span id="adaptiveLabel">Adaptive quadtree</span></div>
   <button id="wipe" aria-label="Move split divider" title="Drag or use left/right arrows">&lt; &gt;</button>
@@ -67,7 +67,7 @@
   <footer class="glass">
     <button id="play">▶ Play</button><button id="pause">Pause</button><button id="step">Step</button><button id="reset">Reset</button>
     <label>Speed <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
-    <button id="home">Reset view</button><button id="returnLive" hidden>Return to live</button>
+    <button id="home">Reset view</button><button id="returnLive" hidden>Return to Live Sim</button>
   </footer>
   <div id="tooltip" class="glass" role="tooltip" hidden></div>
   <output id="error" role="status"></output>

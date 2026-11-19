@@ -1,6 +1,5 @@
 import {Transform,GRID} from './transform.js';
 import {decodeFrame} from './protocol.js';
-import {readLocalScan} from './localScan.js';
 const $=id=>document.getElementById(id),canvas=$('rightCanvas'),ctx=canvas.getContext('2d');
 const raster=$('leftCanvas'),rctx=raster.getContext('2d'),transform=new Transform();
 let latest=null,socket=null,retry=500,polling=false,pollTimer=null,wipe=.5,drag=null,playing=false;
@@ -10,8 +9,6 @@ function mapWidth(){ return innerWidth - (!hudHidden && innerWidth > 820 ? 366 :
 function toggleHud(){ hudHidden=!hudHidden; $('telemetry').hidden=hudHidden; $('hideHud').textContent=hudHidden?'Show HUD':'Hide HUD'; $('hideHud').setAttribute('aria-expanded',String(!hudHidden)); document.body.classList.toggle('hud-hidden',hudHidden); }
 $('hideHud').onclick=toggleHud;
 let localScan = false;
-const localRaster = document.createElement('canvas');
-localRaster.width = localRaster.height = GRID.dim;
 let drawCount=0,received=0,lastStats=performance.now(),latency=null,receivedHz=null;
 const latencyHistory=[];
 const trackLabels = new Map();
@@ -32,47 +29,31 @@ function setMode(value) {
   mode = value;
   $('riskLegend').hidden = mode !== 'risk';
   document.querySelector('.modes').style.setProperty('--active', ['split','elevation','quadtree','risk'].indexOf(mode));
-  $('wipe').hidden = mode !== 'split' || localScan;
-  $('baselineLabel').hidden = !localScan && !mode === 'split';
-  $('adaptiveLabel').hidden = localScan || false;
+  $('wipe').hidden = mode !== 'split';
+  $('baselineLabel').hidden = mode !== 'split';
+  $('adaptiveLabel').hidden = false;
   document.querySelectorAll('[data-mode]').forEach(button => {
-    button.setAttribute('aria-pressed', String(!localScan && button.dataset.mode === mode));
+    button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
   });
 }
 document.querySelectorAll('[data-mode]').forEach(button => {
   button.onclick = () => { setMode(button.dataset.mode); command({action:'configure',settings:{view_mode:button.textContent}}); };
 });
-function closeLocalScan() {
-  localScan = false;
-  $('returnLive').hidden = true;
-  $('baselineLabel').textContent = 'Baseline · 0.25 m grid';
-  setMode(mode);
-}
-$('returnLive').onclick = closeLocalScan;
+$('returnLive').onclick = () => command({action:'return_live'});
 $('upload').onclick = () => $('file').click();
-$('file').onchange = async event => {
-  const file = event.target.files[0];
-  event.target.value = '';
-  if (!file) return;
-  try {
-    const scan = await readLocalScan(file);
-    const context = localRaster.getContext('2d');
-    const image = context.createImageData(GRID.dim, GRID.dim);
-    for (let row = 0; row < GRID.dim; row++) for (let col = 0; col < GRID.dim; col++) {
-      const z = scan.cells[row * GRID.dim + col];
-      const i = transform.rasterIndex(col, row);
-      const color = Number.isFinite(z) ? lut[1 + Math.round(254 * Math.max(0, Math.min(1, (z + 2) / 6)))] : lut[0];
-      image.data.set([...color, 255], i);
-    }
-    context.putImageData(image, 0, 0);
-    localScan = true;
-    $('baselineLabel').textContent = `Local scan · ${scan.count.toLocaleString()} points in view`;
-    $('returnLive').hidden = false;
-    $('error').textContent = '';
-    transform.reset();
-    setMode(mode);
-  } catch (error) { showError(error.message); }
-};
+async function uploadScan(file){
+  if(!file)return;
+  if(file.size>50*1024*1024){showError('Choose a scan of 50 MiB or less.');return;}
+  $('upload').disabled=true;
+  try{const response=await fetch(`/api/upload?filename=${encodeURIComponent(file.name)}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});
+    const result=await response.json();if(!response.ok)throw Error(result.detail);
+    const frame=await fetch('/api/frame',{headers:{Accept:'application/octet-stream'}});receive(await frame.arrayBuffer());
+    $('error').textContent='';transform.reset();
+  }catch(error){showError(error.message);}finally{$('upload').disabled=false;}
+}
+$('file').onchange=event=>{const file=event.target.files[0];event.target.value='';uploadScan(file);};
+addEventListener('dragover',event=>{event.preventDefault();});
+addEventListener('drop',event=>{event.preventDefault();uploadScan(event.dataTransfer.files[0]);});
 function displayTracks(tracks) {
   return (tracks ?? []).filter(track => track.age >= 3 && track.speed >= 0.4).flatMap(track => {
     const [x, y] = track.centroid ?? [track.x, track.y];
@@ -90,7 +71,7 @@ function displayTracks(tracks) {
 }
 function receive(buffer){
   try {
-    latest=decodeFrame(buffer);received++;window.viewerDiagnostics.framesReceived++;
+    latest=decodeFrame(buffer);localScan=latest.meta.extras.source_mode==='upload';$('returnLive').hidden=!localScan;setMode(mode);received++;window.viewerDiagnostics.framesReceived++;
     if (latest.frameId < lastFrameId) {
       trackLabels.clear();
       labelCounts.VEH = labelCounts.PED = 0;
@@ -104,7 +85,7 @@ function receive(buffer){
       image.data[i]=color[0];image.data[i+1]=color[1];image.data[i+2]=color[2];image.data[i+3]=255;
     }
     rctx.putImageData(image,0,0);
-    $('adaptiveLabel').textContent=`Adaptive Quadtree · ${latest.n.toLocaleString()} cells`;
+    $('adaptiveLabel').textContent=`Adaptive Quadtree 2.5D Map - ${latest.n.toLocaleString()} cells`;
     const m=latest.meta.metrics,e=latest.meta.extras;
     latencyHistory.push([m.adaptive_latency_ms,m.fixed_latency_ms]);if(latencyHistory.length>60)latencyHistory.shift();
     const maxLatency=Math.max(1,...latencyHistory.flat());
@@ -119,8 +100,7 @@ function receive(buffer){
     $('memory').textContent = `${m.memory_saved_pct.toFixed(1)}%`;
     $('metrics').textContent = `Frame ${latest.frameId} · RMSE ${m.obstacle_rmse_m.toFixed(4)} m · Ghosts ${m.ghost_cells_detected} · Transport ${latency.toFixed(1)} ms`;
     if(e.runtime_config) syncControls(e.runtime_config);
-    $('routeStatus').textContent = localScan ? 'Return to live to set a destination.' :
-      (e.path_status ? `${e.path_status}${e.path_reason ? ' · ' + e.path_reason : ''} · Click map to set goal` : 'Route planner is off');
+    $('routeStatus').textContent = (e.path_status ? `${e.path_status}${e.path_reason ? ' · ' + e.path_reason : ''} · Click map to set goal` : 'Route planner is off');
     $('routeCompare').hidden = e.fixed_plan_ms == null;
     if (e.fixed_plan_ms != null) {
       const savings = e.nodes_saved_pct == null ? '' : ` · ${e.nodes_saved_pct.toFixed(1)}% fewer nodes`;
@@ -180,6 +160,10 @@ $('home').onclick=()=>transform.reset();$('speed').onchange=event=>command({acti
 const configToggles = [...document.querySelectorAll('[data-config]')];
 function syncControls(config) {
   $('speed').value = String(config.speed);
+  for(const id of ['play','step','speed','dust','tiltMode','pitch','roll','governorProfile'])$(id).disabled=localScan;
+  for(const key of ['simulate_hill_tilt','imu_levelling_enabled'])document.querySelector(`[data-config="${key}"]`).disabled=localScan;
+  document.querySelector('.telemetry>.eyebrow').textContent=localScan?'Uploaded static scan':'Live simulation';
+
   $('dustControls').hidden=!config.sor_enabled;
   $('tiltControls').hidden=!config.simulate_hill_tilt;
   $('manualTilt').hidden=config.tilt_mode!=='Manual';$('tiltMode').value=config.tilt_mode;
@@ -203,7 +187,7 @@ $('dust').oninput = () => { $('dustValue').textContent = `${$('dust').value}%`; 
 $('dust').onchange = () => command({action:'configure',settings:{outlier_ratio:Number($('dust').value)/100}});
 const pointers=new Map(); let pinch=null;
 function inspectCell(event){
-  const tip=$('tooltip'); if(!latest || drag || localScan){tip.hidden=true;return;}
+  const tip=$('tooltip'); if(!latest || drag){tip.hidden=true;return;}
   const world=transform.screenToWorld(event.clientX,event.clientY),g=transform.worldToGrid(world.x,world.y);
   if(g.col<0 || g.row<0 || g.col>=256 || g.row>=256){tip.hidden=true;return;}
   let detail;
@@ -235,7 +219,7 @@ canvas.onpointermove=event=>{
   transform.pan(event.clientX-drag.x,event.clientY-drag.y);Object.assign(drag,{x:event.clientX,y:event.clientY,moved:true});
 };
 canvas.onpointerup=event=>{
-  if(drag && !drag.moved && !pinch && !localScan && latest?.meta.extras.runtime_config?.planner_enabled){const {x,y}=transform.screenToWorld(event.clientX,event.clientY);command({action:'set_goal',goal_xy:[x,y]});}
+  if(drag && !drag.moved && !pinch && latest?.meta.extras.runtime_config?.planner_enabled){const {x,y}=transform.screenToWorld(event.clientX,event.clientY);command({action:'set_goal',goal_xy:[x,y]});}
   pointers.delete(event.pointerId);pinch=null;drag=null;
 };
 canvas.onpointercancel=()=>{pointers.clear();pinch=null;drag=null;};
@@ -252,11 +236,7 @@ function draw(now){
   const width=innerWidth,height=innerHeight,divider=width*wipe;
   const targetWidth=mapWidth(); transform.resize(reducedMotion.matches?targetWidth:transform.width+(targetWidth-transform.width)*.12,height);
   ctx.fillStyle='#050811';ctx.fillRect(0,0,width,height);
-  if(localScan) {
-    const extent = transform.extentRect();
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(localRaster,extent.x,extent.y,extent.width,extent.height);
-  } else if(latest){
+  if(latest){
     const extent=transform.extentRect();
     if (mode === 'split' || false) {
     ctx.save();ctx.beginPath();ctx.rect(0,0,mode === 'split' ? divider : width,height);ctx.clip();ctx.imageSmoothingEnabled=false;ctx.drawImage(raster,extent.x,extent.y,extent.width,extent.height);

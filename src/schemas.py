@@ -17,6 +17,8 @@ class FrameExtras(TypedDict, total=False):
     Planner/governor/perception fields remain None until their sessions.
     encode_ms is previous complete pack + transport sample; see encode_frame_id.
     """
+    source_mode: str | None
+    upload_ground_m: float | None
     filtered_noise_points: int | None
     noise_removal_pct: float | None
     noise_recall_pct: float | None

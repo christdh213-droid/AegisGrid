@@ -152,7 +152,7 @@ def test_binary_rest_controls_legacy_and_websocket():
     with TestClient(app) as client:
         assert client.get('/legacy').status_code == 200
         assert client.get('/static/js/transform.js').status_code == 200
-        assert client.post('/api/upload').status_code == 501
+        assert client.post('/api/upload').status_code == 400  # Missing scan is rejected
         assert client.post('/api/control', json={'action':'configure','settings':{'outlier_ratio':1}}).status_code == 400
         assert client.post('/api/control', json=[]).status_code == 400
         response = client.post('/api/reset', headers={'Accept':'application/octet-stream'})

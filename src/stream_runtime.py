@@ -8,6 +8,7 @@ import threading
 import time
 from collections import deque
 
+from src.scan_upload import StaticOccupancy
 from src.config import GOVERNOR_PROFILES, PipelineConfig, RuntimeConfig
 from src.compute_governor import ComputeGovernor
 from src.data_source import SyntheticLidarStream
@@ -76,6 +77,9 @@ class StreamState:
         self.previous_encode = None
         self.previous_encode_id = None
         self.subscribers = set()
+        self.uploaded_points = None
+        self.upload_ground_m = None
+        self.live_runtime = None
 
     def _map_options(self, fixed, _runtime):
         # PRE_MAP runs before tracking this frame. The mapper separately
@@ -85,7 +89,10 @@ class StreamState:
     def _step(self):
         snapshot = self.runtime  # frozen, remains valid for the whole frame
         self.stream.runtime_config = snapshot
-        points, metadata = next(self.stream)
+        if self.uploaded_points is None:
+            points, metadata = next(self.stream)
+        else:
+            points, metadata = self.uploaded_points, {'source': 'upload'}
         metadata['runtime_config'] = snapshot
         self.governor_settings = self.governor.select(snapshot.governor_profile)
         started = time.perf_counter()
@@ -104,7 +111,7 @@ class StreamState:
         ))
         if snapshot.planner_enabled:
             frame.extras.update(self.planner.sample_fixed_grid(time.perf_counter()))
-        frame.extras.update(runtime_config=snapshot.to_dict(), server_fps=self.server_fps(),
+        frame.extras.update(source_mode='upload' if self.uploaded_points is not None else 'simulation', upload_ground_m=self.upload_ground_m, runtime_config=snapshot.to_dict(), server_fps=self.server_fps(),
                             encode_ms=self.previous_encode, encode_frame_id=self.previous_encode_id)
         start = time.perf_counter()
         columns = self.pipeline.adaptive_map.leaf_arrays
@@ -122,6 +129,20 @@ class StreamState:
         self.revision += 1
         return payload
 
+    def load_scan(self, points, ground):
+        with self.lock:
+            if self.uploaded_points is None:
+                self.live_runtime = self.runtime
+            self.runtime = replace(self.runtime, outlier_ratio=0., simulate_hill_tilt=False,
+                                   imu_levelling_enabled=False, governor_profile='Unrestricted')
+            self.uploaded_points, self.upload_ground_m = points, ground
+            self.pipeline.reset(); self.planner.reset(); self.governor.reset()
+            self.pipeline.tracker = StaticOccupancy(self.config.grid_dim)
+            self.is_playing = False
+            self.completions.clear()
+            self._step()
+            return {'points': len(points), 'ground_offset_m': ground, 'source_mode': 'upload'}
+
     def server_fps(self):
         if len(self.completions) < 2:
             return None
@@ -133,7 +154,17 @@ class StreamState:
             if not isinstance(message, dict):
                 raise ValueError('Control must be a JSON object')
             action = message.get('action')
-            if action == 'reset':
+            if action == 'return_live':
+                self.uploaded_points = None
+                self.upload_ground_m = None
+                self.runtime = self.live_runtime or RuntimeConfig()
+                self.live_runtime = None
+                self.pipeline.reset(); self.planner.reset(); self.governor.reset(); self.stream.reset()
+                self.is_playing = False; self.completions.clear(); self._step()
+            elif action == 'reset':
+                self.uploaded_points = None
+                self.upload_ground_m = None
+                self.live_runtime = None
                 self.runtime = RuntimeConfig()
                 self.pipeline.reset()
                 self.planner.reset()
@@ -147,7 +178,7 @@ class StreamState:
             elif action == 'step':
                 self._step()
             elif action == 'play':
-                self.is_playing = True
+                self.is_playing = self.uploaded_points is None
             elif action == 'pause':
                 self.is_playing = False
             elif action == 'set_speed':
@@ -158,12 +189,14 @@ class StreamState:
             elif action in ('configure', 'set_goal', 'set_profile'):
                 updates = message.get('settings', {}) if action == 'configure' else ({'goal_xy': message.get('goal_xy')} if action == 'set_goal' else {'governor_profile': message.get('profile')})
                 previous = self.runtime
-                self.runtime = updated_config(previous, updates)
+                candidate = updated_config(previous, updates)
+                if self.uploaded_points is not None:
+                    candidate = replace(candidate, outlier_ratio=0., simulate_hill_tilt=False,
+                                        imu_levelling_enabled=False, governor_profile='Unrestricted')
+                self.runtime = candidate
                 if previous.planner_enabled != self.runtime.planner_enabled:
                     self.planner.reset()
-                if not self.is_playing and (previous.goal_xy != self.runtime.goal_xy
-                        or previous.planner_enabled != self.runtime.planner_enabled
-                        or previous.governor_profile != self.runtime.governor_profile):
+                if not self.is_playing and previous != self.runtime:
                     self._step()
             else:
                 raise ValueError('Unknown action')

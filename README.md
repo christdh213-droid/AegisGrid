@@ -33,3 +33,16 @@ With Docker installed, the equivalent local commands are:
 docker build -t sih26053-viewer .
 docker run --rm -p 127.0.0.1:8766:8766 -e PORT=8766 -e MAX_FPS=12 -e DISABLE_PROCESS_POOL=1 sih26053-viewer
 ```
+
+
+### Static scan upload
+Select **Upload LiDAR** or drop a `.bin` (little-endian float32 XYZI), `.npy`
+(real numeric Nx3/Nx4, no pickle), or `.csv` (`x,y,z[,intensity]`, optional header).
+Uploads are capped at 50 MiB and 1,000,000 points, processed in memory, cropped to
+[-32,+32] m, and normalized by subtracting the in-bounds 10th-percentile Z.
+SOR, traversability and goal planning work on the static scan; tracking, dust,
+tilt simulation and playback are inactive. **Return to Live Sim** restores the
+previous simulation settings and starts paused. The demo has one shared server
+state, so an upload changes the scan for every connected viewer.
+API: POST raw file bytes to `/api/upload?filename=scan.npy`; return with
+`{"action":"return_live"}` on the existing control channel.

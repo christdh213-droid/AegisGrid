@@ -174,8 +174,20 @@ async def set_speed(fps: float):
     return await control({"action": "set_speed", "fps": fps})
 
 @app.post("/api/upload")
-async def upload_stub():
-    raise HTTPException(501, "Upload parsing is scheduled for Session 6")
+async def upload_scan(request: Request):
+    from src.scan_upload import parse_scan, MAX_UPLOAD_BYTES
+    data = bytearray()
+    async for chunk in request.stream():
+        if len(data) + len(chunk) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "Scan exceeds 50 MiB limit")
+        data.extend(chunk)
+    try:
+        points, ground = await asyncio.to_thread(parse_scan, data, request.query_params.get('filename', ''))
+    except (ValueError, TypeError, EOFError, UnicodeError, OSError) as error:
+        raise HTTPException(400, str(error)) from error
+    result = await asyncio.to_thread(state.load_scan, points, ground)
+    state.publish()
+    return result
 
 @app.get("/api/stream-stats")
 async def stream_statistics():

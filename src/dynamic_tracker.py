@@ -158,7 +158,11 @@ class DynamicTracker:
         )
 
         # ── 5. Cluster dynamic cells ──────────────────────────────────────
-        labelled, num_clusters = ndimage.label(dynamic_mask, structure=np.ones((3, 3)))
+        # Pad before closing so components touching the map edge survive erosion.
+        padded = np.pad(dynamic_mask, 2)
+        closed = ndimage.binary_closing(padded, structure=np.ones((5, 5), dtype=bool))
+        foreground = ndimage.binary_fill_holes(closed)[2:-2, 2:-2]
+        labelled, num_clusters = ndimage.label(foreground, structure=np.ones((3, 3)))
         detections = []  # list of dicts with centroid, size, z_max, etc.
 
         for cid in range(1, num_clusters + 1):
@@ -172,9 +176,15 @@ class DynamicTracker:
             xs = (cols.astype(np.float64) + 0.5) * cfg.finest_res_m - cfg.half_size
             ys = (rows.astype(np.float64) + 0.5) * cfg.finest_res_m - cfg.half_size
             cx, cy = float(xs.mean()), float(ys.mean())
-            z_max_val = float(max_z[cluster_mask].max())
+            z_max_val = float(max_z[cluster_mask & dynamic_mask].max())
             width = float(xs.max() - xs.min() + cfg.finest_res_m)
             length = float(ys.max() - ys.min() + cfg.finest_res_m)
+            long_side, short_side = max(width, length), min(width, length)
+            if (cell_count * cfg.finest_res_m ** 2 < cfg.min_component_area_m2
+                    or long_side > cfg.max_component_extent_m
+                    or (long_side > cfg.elongated_extent_m
+                        and long_side / short_side > cfg.max_elongated_aspect)):
+                continue
 
             detections.append({
                 "cx": cx, "cy": cy, "z_max": z_max_val,

@@ -27,6 +27,10 @@ class PipelineConfig:
     # ── Dynamic perception ────────────────────────────────────────────────
     dynamic_height_residual_m: float = 0.30  # Height above static ref → dynamic
     min_cluster_cells: int = 4               # Min cells for a valid cluster
+    min_component_area_m2: float = 0.15
+    max_component_extent_m: float = 8.0
+    elongated_extent_m: float = 5.0
+    max_elongated_aspect: float = 6.0
     max_cluster_cells: int = 400             # Max cells for a valid cluster
     track_association_dist_m: float = 2.5    # Max match distance (Hungarian)
     track_max_missed_frames: int = 3         # Frames before track deletion

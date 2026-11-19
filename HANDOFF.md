@@ -695,3 +695,8 @@ excludes pipeline compute, and no actual memory RSS or radio estimate is claimed
 Timing targets are host-load-sensitive; sustained 25-30 fresh frames/s remains
 unverified despite the 60 FPS redraw result. Branch is not merged. Waiting at the
 Session 1 approval gate; no Session 2 implementation started.
+
+## Session progress — Session 2 partial checkpoint
+
+Part 1.1 steps 1 and 2: padded 5x5 binary closing, hole filling and 8-connected labelling for detections. Height samples come from observed dynamic cells. Original mask still feeds mapping. Config keys min_component_area_m2=0.15, max_component_extent_m=8.0, elongated_extent_m=5.0, max_elongated_aspect=6.0. Existing cluster-count bounds still apply. No new files, controls or extras keys.
+32 tests passed in 7.28s, including hollow/broken, map-edge, undersized and elongated components. First 300 default seeded frames: max obstacle RMSE 0 m, ghosts 0, minimum reduction 90.10818566055295%, minimum estimated memory saved 92.99346923828125%. After 30 warm-up frames, existing tracker emitted exactly four outputs on 0/300 frames. No confirmed-track, false-positive or ID-churn acceptance result. Steps 3–7 outstanding, next numbered step 3. Scope boundary is actor-specific association, occlusion coasting and trajectory prediction in the tactical UGV application. The source dt is 0.1 s. Usage remaining (5h/weekly) before start 73/75%, after step 1 71/74%, after step 2 70/74%.

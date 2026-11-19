@@ -346,3 +346,22 @@ class TestConfig:
         assert cfg2.grid_dim == cfg.grid_dim
         assert cfg2.seed == cfg.seed
 
+
+def test_component_geometry_filters_and_preserves_measured_mask():
+    cfg = PipelineConfig()
+    tracker = DynamicTracker(cfg)
+    shape = (cfg.grid_dim, cfg.grid_dim)
+    ground = np.zeros(shape, dtype=np.float32)
+    count = np.ones(shape, dtype=np.int32)
+    tracker.process(ground, count, ground, cfg.dt)
+    z = ground.copy()
+    z[50:57, 50:58] = 1
+    z[51:56, 51:57] = 0   # hollow object
+    z[50, 53] = 0          # interrupted edge
+    z[80:82, 80:114] = 1   # longer than 8 m
+    z[110:112, 80:103] = 1 # thin and longer than 5 m
+    z[0:3, 20:23] = 1      # map-edge obstacle
+    z[140, 140:142] = 1   # too small
+    mask, tracks, _ = tracker.process(z, count, z, cfg.dt)
+    np.testing.assert_array_equal(mask, z > 0)
+    assert sorted((t.width, t.length) for t in tracks) == [(.75, .75), (2., 1.75)]

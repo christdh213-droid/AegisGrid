@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace, fields
 import math
+import os
 import threading
 import time
 from collections import deque
@@ -47,13 +48,19 @@ def updated_config(config, updates):
 
 class StreamState:
     def __init__(self):
+        self.max_fps = float(os.environ.get("MAX_FPS", "30"))
+        if not math.isfinite(self.max_fps) or self.max_fps < 1:
+            raise ValueError("MAX_FPS must be a finite number of at least 1")
+        self.disable_process_pool = os.environ.get("DISABLE_PROCESS_POOL", "1").strip().lower() in {
+            "1", "true", "yes", "on",
+        }
         self.lock = threading.RLock()
         self.config = PipelineConfig()
         self.runtime = RuntimeConfig()
         self.pipeline = PerceptionPipeline(self.config)
         self.stream = SyntheticLidarStream(self.config)
         self.is_playing = False
-        self.target_fps = 30.0
+        self.target_fps = min(30.0, self.max_fps)
         self.current_frame = None
         self.latest_binary = None
         self.revision = 0
@@ -104,7 +111,7 @@ class StreamState:
                 self.pipeline.reset()
                 self.stream.reset()
                 self.is_playing = False
-                self.target_fps = 30.0
+                self.target_fps = min(30.0, self.max_fps)
                 self.completions.clear()
                 self.previous_encode = self.previous_encode_id = None
                 self._step()
@@ -118,7 +125,7 @@ class StreamState:
                 fps = message.get('fps')
                 if type(fps) not in (float, int) or not math.isfinite(fps):
                     raise ValueError('fps must be finite')
-                self.target_fps = max(1., min(30., float(fps)))
+                self.target_fps = max(1., min(30., self.max_fps, float(fps)))
             elif action in ('configure', 'set_goal', 'set_profile'):
                 updates = message.get('settings', {}) if action == 'configure' else ({'goal_xy': message.get('goal_xy')} if action == 'set_goal' else {'governor_profile': message.get('profile')})
                 self.runtime = updated_config(self.runtime, updates)
@@ -168,7 +175,7 @@ class StreamState:
             if revision != last:
                 self.publish()
                 last = revision
-            interval = 1 / (self.target_fps * self.runtime.speed)
+            interval = 1 / min(self.max_fps, self.target_fps * self.runtime.speed)
             deadline += interval
             now = asyncio.get_running_loop().time()
             if deadline < now:

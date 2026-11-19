@@ -117,6 +117,10 @@ async def lifespan(app):
 
 app.router.lifespan_context = lifespan
 
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    return {"status": "ok"}
+
 async def control(message):
     try:
         ack = await asyncio.to_thread(state.execute, message)
@@ -1120,7 +1124,7 @@ def main():
         description="SIH26053 DRDO - Adaptive LiDAR Perception Interactive Prototype"
     )
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Host interface")
-    parser.add_argument("--port", type=int, default=8000, help="Port to bind")
+    parser.add_argument("--port", type=int, default=os.environ.get("PORT", "8000"), help="Port to bind")
     args = parser.parse_args()
 
     print(f"\n{'='*72}")

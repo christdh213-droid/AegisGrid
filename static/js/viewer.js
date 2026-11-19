@@ -2,12 +2,15 @@ import {ArchitectureLayer} from './cartography.js';
 import {paintBaseline,drawAdaptive,drawRibbon,drawActor,drawRadar,drawEgo,drawBeam,drawActivity} from './sceneStyle.js';
 import {Transform,GRID} from './transform.js';
 import {decodeFrame} from './protocol.js';
+import {ActorMotion} from './actorMotion.js';
 const $=id=>document.getElementById(id),canvas=$('rightCanvas'),ctx=canvas.getContext('2d');
 const raster=$('leftCanvas'),rctx=raster.getContext('2d'),transform=new Transform();
 const architecture=new ArchitectureLayer();
 const composedLayer=document.createElement('canvas');let composedKey='';
 const adaptiveLayer=document.createElement('canvas');let adaptiveKey='',frameRevision=0;
 const wakes=new Map();
+const actorMotion=new ActorMotion();
+let lastActorPacket=null,profileSelectedAt=-Infinity;
 let latest=null,socket=null,retry=500,polling=false,pollTimer=null,wipe=.5,drag=null,playing=false;
 let mode = 'split', hudHidden = false, lowFpsSince = null;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -81,13 +84,17 @@ function receive(buffer){
   try {
     frameRevision++;latest=decodeFrame(buffer);localScan=latest.meta.extras.source_mode==='upload';$('returnLive').hidden=!localScan;setMode(mode);received++;window.viewerDiagnostics.framesReceived++;
     if (latest.frameId < lastFrameId) {
-      trackLabels.clear();wakes.clear();
+      trackLabels.clear();wakes.clear();actorMotion.clear();lastActorPacket=null;
       labelCounts.VEH = labelCounts.PED = 0;
     }
     lastFrameId = latest.frameId;
     latest.displayTracks = displayTracks(latest.meta.dynamic_tracks);
     const activeIds=new Set();for(const track of latest.displayTracks){const key=track.track_id??track.label;activeIds.add(key);const history=wakes.get(key)??[];history.push([track.x,track.y]);if(history.length>8)history.shift();wakes.set(key,history);track.wake=history;}
     for(const key of wakes.keys())if(!activeIds.has(key))wakes.delete(key);
+    // Repeated REST snapshots must not restart the extrapolation clock.
+    const actorPacket=`${latest.frameId}:${latest.serverTime}`;
+    if(localScan){actorMotion.clear();lastActorPacket=null;}
+    else if(actorPacket!==lastActorPacket){actorMotion.update(latest.displayTracks,receiveStart);lastActorPacket=actorPacket;}
     latency=Date.now()-latest.serverTime;window.viewerDiagnostics.latencyMs=latency;
     paintBaseline(latest,raster);
     $('adaptiveLabel').textContent=`Adaptive Quadtree 2.5D Map - ${latest.n.toLocaleString()} cells`;
@@ -163,7 +170,7 @@ async function command(message){
   if(socket?.readyState===1){socket.send(JSON.stringify(message));return;}
   try{const response=await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(message)});const result=await response.json();if(!response.ok)throw Error(result.detail);playing=result.playing;if(result.config)syncControls(result.config);if(['step','reset','set_goal'].includes(message.action)){const frame=await fetch('/api/frame',{headers:{Accept:'application/octet-stream'}});receive(await frame.arrayBuffer());}}catch(error){showError(error);}
 }
-for(const action of ['play','pause','step','reset'])$(action).onclick=()=>{if(action==='reset'){trackLabels.clear();wakes.clear();labelCounts.VEH=labelCounts.PED=0;transform.reset();wipe=.5;$('wipe').style.left='50%';}command({action});};
+for(const action of ['play','pause','step','reset'])$(action).onclick=()=>{if(action==='reset'){trackLabels.clear();wakes.clear();actorMotion.clear();lastActorPacket=null;labelCounts.VEH=labelCounts.PED=0;transform.reset();wipe=.5;$('wipe').style.left='50%';}command({action});};
 $('home').onclick=()=>transform.reset();$('speed').onchange=event=>command({action:'configure',settings:{speed:Number(event.target.value)}});
 const configToggles = [...document.querySelectorAll('[data-config]')];
 function syncControls(config) {
@@ -178,7 +185,11 @@ function syncControls(config) {
   $('uncompensated').hidden=!config.simulate_hill_tilt || config.imu_levelling_enabled;
   for(const axis of ['pitch','roll'])if(document.activeElement!==$(axis)){$(axis).value=config[axis+'_deg'];$(axis+'Value').textContent=`${config[axis+'_deg']}°`;}
 
-  $('governorProfile').value = config.governor_profile ?? 'Unrestricted';
+  const profileSelect=$('governorProfile');
+  // Keep the user's choice while focused and allow in-flight telemetry to catch up.
+  if(document.activeElement!==profileSelect && performance.now()-profileSelectedAt>=1500){
+    profileSelect.value = config.governor_profile ?? 'Unrestricted';
+  }
   for (const toggle of configToggles) {toggle.checked = Boolean(config[toggle.dataset.config]);toggle.setAttribute('aria-checked',String(toggle.checked));}
   if (document.activeElement !== $('dust')) {
     $('dust').value = String(Math.round(config.outlier_ratio * 100));
@@ -190,7 +201,10 @@ const modeButtons=[...document.querySelectorAll('[data-mode]')];
 for(const [i,button] of modeButtons.entries())button.onkeydown=event=>{let j;if(event.key==='ArrowRight')j=(i+1)%4;else if(event.key==='ArrowLeft')j=(i+3)%4;else if(event.key==='Home')j=0;else if(event.key==='End')j=3;else return;event.preventDefault();modeButtons[j].focus();modeButtons[j].click();};
 $('tiltMode').onchange=event=>command({action:'configure',settings:{tilt_mode:event.target.value}});
 for(const axis of ['pitch','roll']){$(axis).oninput=()=>$(axis+'Value').textContent=`${$(axis).value}°`;$(axis).onchange=()=>command({action:'configure',settings:{[axis+'_deg']:Number($(axis).value)}});}
-$('governorProfile').onchange = event => command({action:'set_profile',profile:event.target.value});
+$('governorProfile').onchange = event => {
+  profileSelectedAt=performance.now();
+  command({action:'set_profile',profile:event.target.value});
+};
 for (const toggle of configToggles) {
   toggle.onchange = () => {toggle.setAttribute('aria-checked',String(toggle.checked));command({action:'configure',settings:{[toggle.dataset.config]:toggle.checked}});};
 }
@@ -271,9 +285,14 @@ function draw(now){
     // World overlays remain seamless across the wipe.
     drawRadar(ctx,transform,now,true);
     drawRibbon(ctx,latest.meta.extras,transform,now,true);
+  }
+  }
+  ctx.drawImage(composedLayer,0,0,width,height);
+  if(latest){
+    // Actors and their labels animate every RAF above the cached map layers.
     const occupiedTags = [];
     ctx.font = '11px ui-monospace,Consolas,monospace';
-    for (const track of latest.displayTracks) {
+    for (const track of localScan ? latest.displayTracks : actorMotion.sample(now)) {
       const point = transform.worldToScreen(track.x, track.y);
       drawActor(ctx,track,transform);
       if (!track.label) continue;
@@ -296,8 +315,6 @@ function draw(now){
     }
     drawEgo(ctx,transform,now,true);
   }
-  }
-  ctx.drawImage(composedLayer,0,0,width,height);
   if(latest){drawActivity(ctx,latest.meta.extras,transform,now,reducedMotion.matches);drawCount++;}
   if(now-lastStats>=1000){const seconds=(now-lastStats)/1000;const fps=drawCount/seconds;receivedHz=received/seconds;$('fps').textContent=`Render ${fps.toFixed(1)} FPS · Received ${receivedHz.toFixed(1)} Hz`;Object.assign(window.viewerDiagnostics,{renderFps:fps,receivedFps:receivedHz}); if(socket?.readyState===1)updateConnection(`LIVE ${fps.toFixed(0)} FPS`,true); if(fps<20 && latest){lowFpsSince ??= now; if(now-lowFpsSince>=3000)document.body.classList.add('lite');}else lowFpsSince=null;drawCount=0;received=0;lastStats=now;}
   window.viewerDiagnostics.drawMs=performance.now()-drawStart;

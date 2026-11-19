@@ -119,6 +119,11 @@ async def lifespan(app):
 
 app.router.lifespan_context = lifespan
 
+@app.get("/api/scene_layout")
+async def get_scene_layout():
+    from src.data_source import scene_layout
+    return scene_layout()
+
 @app.get("/healthz", include_in_schema=False)
 async def healthz():
     return {"status": "ok"}

@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: aegisgrid
+    runtime: docker
+    plan: free
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: MAX_FPS
+        value: "12"
+      - key: DISABLE_PROCESS_POOL
+        value: "1"

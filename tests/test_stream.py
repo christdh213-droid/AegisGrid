@@ -113,7 +113,8 @@ def test_controls_frozen_snapshot_defaults_and_validation():
         state.runtime.speed = 2
     state.execute({'action': 'step'})
     assert state.current_frame.extras['runtime_config']['outlier_ratio'] == .15
-    assert state.current_frame.extras['filtered_noise_points'] is None
+    assert state.current_frame.extras['filtered_noise_points'] == 0
+    assert state.current_frame.extras['sor_ms'] is None
     for updates in ({'outlier_ratio': .2}, {'speed': float('nan')}, {'sor_enabled': 'false'}, {'bogus': 1}, {'goal_xy': [1, float('inf')]}):
         with pytest.raises(ValueError):
             updated_config(state.runtime, updates)
@@ -170,4 +171,5 @@ def test_binary_rest_controls_legacy_and_websocket():
                 else:
                     ack = json.loads(message['text'])
             assert ack['action'] == 'step'
+            assert binary['frame_id'] == 1
             assert binary['metadata']['extras']['runtime_config']['sor_enabled'] is False

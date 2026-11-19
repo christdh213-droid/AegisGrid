@@ -42,6 +42,14 @@ class PipelineConfig:
     # ── Simulation / synthetic data ───────────────────────────────────────
     points_per_frame: int = 45000
     sensor_noise_std: float = 0.02
+    dust_voxel_m: float = 0.5
+    dust_min_elevation_m: float = 0.38
+    dust_near_neighbors: int = 10
+    dust_far_neighbors: int = 9
+    caution_span_m: float = 0.12
+    caution_step_m: float = 0.15
+    hazard_span_m: float = 0.35
+    hazard_step_m: float = 0.35
     dt: float = 0.1
     seed: int = 42
 

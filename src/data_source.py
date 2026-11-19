@@ -11,6 +11,7 @@ import os
 from typing import Dict, Any, Iterator, Optional, Tuple
 
 import numpy as np
+from src.plugins import tilt_rotation
 
 from src.config import PipelineConfig
 
@@ -89,6 +90,10 @@ class SyntheticLidarStream:
         self.cfg = config
         self.outlier_ratio = outlier_ratio
         self.rng = np.random.default_rng(config.seed)
+        self.weather_rng = np.random.default_rng(config.seed + 1)
+        self.imu_rng = np.random.default_rng(config.seed + 2)
+        self.runtime_config = None
+        self.tilt_started_at = None
         self.frame_idx = 0
         self.time = 0.0
         self.half = config.half_size  # 32.0
@@ -211,11 +216,18 @@ class SyntheticLidarStream:
         all_pts = np.vstack([ground_pts, static_pts, dyn_pts])
 
         # ── 5. Optional dust/outlier injection ───────────────────────────
-        if self.outlier_ratio > 0:
-            n_outliers = int(all_pts.shape[0] * self.outlier_ratio)
-            ox = self.rng.uniform(-self.half, self.half, n_outliers)
-            oy = self.rng.uniform(-self.half, self.half, n_outliers)
-            oz = self.rng.uniform(-2.0, 8.0, n_outliers)
+        runtime = self.runtime_config
+        ratio = runtime.outlier_ratio if runtime is not None else self.outlier_ratio
+        n_real = len(all_pts)
+        if ratio > 0:
+            n_outliers = int(n_real * ratio)
+            rng = self.weather_rng
+            ox = rng.uniform(-self.half, self.half, n_outliers)
+            oy = rng.uniform(-self.half, self.half, n_outliers)
+            # A loose drifting band within distributed airborne returns.
+            band = rng.random(n_outliers) < .08
+            oy[band] = rng.normal(10 * np.sin(.4 * self.time), 5., band.sum())
+            oz = self._terrain_z(ox, oy) + rng.uniform(.5, 4., n_outliers)
             outliers = np.column_stack([ox, oy, oz])
             all_pts = np.vstack([all_pts, outliers])
 
@@ -225,16 +237,36 @@ class SyntheticLidarStream:
             (all_pts[:, 1] >= -self.half) & (all_pts[:, 1] < self.half)
         )
         all_pts = all_pts[mask]
+        noise_truth = (np.arange(len(mask)) >= n_real)[mask]
 
-        # Simulated IMU angles (small realistic values)
-        imu_pitch = float(0.5 * np.sin(0.3 * self.time))
-        imu_roll = float(0.3 * np.cos(0.2 * self.time))
+        imu_pitch = imu_roll = 0.0
+        tilt = runtime is not None and runtime.simulate_hill_tilt
+        if tilt:
+            if self.tilt_started_at is None:
+                self.tilt_started_at = self.time
+            ease = min(1.0, self.time - self.tilt_started_at)
+            if runtime.tilt_mode == "Manual":
+                pitch, roll = runtime.pitch_deg, runtime.roll_deg
+            else:
+                pitch = 6 * np.sin(2 * np.pi * .20 * self.time)
+                roll = 4 * np.sin(2 * np.pi * .13 * self.time + .7)
+            imu_pitch, imu_roll = float(ease * pitch), float(ease * roll)
+            all_pts = all_pts @ tilt_rotation(imu_pitch, imu_roll).T
+            if runtime.imu_noise_deg:
+                noise = self.imu_rng.normal(0., runtime.imu_noise_deg, 2)
+                imu_pitch += float(noise[0])
+                imu_roll += float(noise[1])
+        else:
+            self.tilt_started_at = None
 
         metadata: Dict[str, Any] = {
             "frame_id": self.frame_idx,
             "timestamp": self.time,
             "imu_pitch": imu_pitch,
             "imu_roll": imu_roll,
+            "sensor_tilt_applied": tilt,
+            "simulated_outlier_ratio": ratio,
+            "is_injected_noise": noise_truth,
             "ground_truth_actors": gt_actors,
             "source": "synthetic",
         }

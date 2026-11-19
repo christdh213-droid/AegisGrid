@@ -11,7 +11,8 @@ from typing import Generator, Optional
 
 import numpy as np
 
-from src.config import PipelineConfig
+from src.config import PipelineConfig, RuntimeConfig
+from src.plugins import DustOutlierFilterHook, ImuTiltCompensationHook, TraversabilityRiskHook
 from src.schemas import AdaptiveCell, FrameOutput, default_frame_extras
 from src.hooks import (
     DefaultPreProcessHook,
@@ -43,6 +44,7 @@ class PerceptionPipeline:
         pre_map_hook=None,
         post_track_hook=None,
         post_frame_hook=None,
+        perception=False,
     ):
         self.cfg = config
         self.pre_hook = pre_hook or DefaultPreProcessHook()
@@ -52,6 +54,10 @@ class PerceptionPipeline:
         self.pre_map_hook = pre_map_hook
         self.post_track_hook = post_track_hook
         self.post_frame_hook = post_frame_hook
+        self.perception = perception
+        self.imu = ImuTiltCompensationHook()
+        self.dust_filter = DustOutlierFilterHook()
+        self.risk = TraversabilityRiskHook()
 
         # Internal state
         self.fixed_map = FixedGridMap(config)
@@ -88,6 +94,32 @@ class PerceptionPipeline:
         if self.source_hook:
             points, metadata = self.source_hook(points, metadata)
 
+        if self.perception:
+            metadata = metadata.copy()
+            truth = metadata.pop("is_injected_noise", None)
+            runtime = metadata.get("runtime_config") or RuntimeConfig()
+            points, imu_extras = self.imu(points, metadata, runtime)
+            extras.update(imu_extras)
+            start = time.perf_counter()
+            clean_simulation = (
+                metadata.get("source") == "synthetic"
+                and metadata.get("simulated_outlier_ratio") == 0
+            )
+            run_filter = runtime.sor_enabled and not clean_simulation
+            keep = self.dust_filter(points, self.cfg) if run_filter else np.ones(len(points), dtype=bool)
+            extras["sor_ms"] = (time.perf_counter() - start) * 1000 if run_filter else None
+            removed = ~keep
+            removed_count = int(removed.sum())
+            extras["filtered_noise_points"] = removed_count
+            extras["noise_removal_pct"] = 100.0 * removed_count / len(points) if len(points) else 0.0
+            if truth is not None:
+                if truth.any():
+                    extras["noise_recall_pct"] = 100.0 * np.count_nonzero(removed & truth) / truth.sum()
+                if not truth.all():
+                    extras["true_points_lost_pct"] = 100.0 * np.count_nonzero(removed & ~truth) / np.count_nonzero(~truth)
+            if removed_count:
+                points = points[keep]
+
         # ── 0. Pre-process hook (Codex: SOR / IMU levelling) ─────────────
         points, hook_extras = self.pre_hook(points, metadata)
         if hook_extras:
@@ -108,9 +140,9 @@ class PerceptionPipeline:
         # ── 2. Dynamic detection ─────────────────────────────────────────
         timer.start("dynamic")
         dynamic_mask, tracks, ghost_count = self.tracker.process(
-            self.fixed_map.max_z.copy(),
-            self.fixed_map.count.copy(),
-            self.fixed_map.mean_z.copy(),
+            self.fixed_map.max_z,
+            self.fixed_map.count,
+            self.fixed_map.mean_z,
             dt,
         )
         timer.stop("dynamic")
@@ -145,6 +177,9 @@ class PerceptionPipeline:
             fixed_grid_shape=(self.cfg.grid_dim, self.cfg.grid_dim),
             extras=extras,
         )
+
+        if self.perception:
+            frame.extras.update(self.risk(frame, self))
 
         # ── 7. Stream callback (Codex: WebSocket / UI push) ─────────────
         if self.post_frame_hook:

@@ -51,6 +51,8 @@ class FrameExtras(TypedDict, total=False):
     encode_frame_id: int | None
     server_fps: float | None
     runtime_config: dict | None
+    sor_ms: float | None  # Occupancy filter execution time in milliseconds.
+    traversability_ms: float | None  # Classification and label assignment time in milliseconds.
 
 
 def default_frame_extras() -> FrameExtras:

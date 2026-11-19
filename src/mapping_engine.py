@@ -150,7 +150,7 @@ class AdaptiveQuadtreeMap:
         valid0 = fixed.count > 0
         min_z0 = np.where(valid0, fixed.min_z, np.float32(0.0)).astype(np.float32)
         max_z0 = np.where(valid0, fixed.max_z, np.float32(0.0)).astype(np.float32)
-        mean_z0 = fixed.mean_z.copy()
+        mean_z0 = fixed.mean_z
         count0 = fixed.count.copy()
         dyn0 = dynamic_mask.astype(bool).copy()
 
@@ -226,17 +226,13 @@ class AdaptiveQuadtreeMap:
             # Rule 3: gradient between sibling children ≤ threshold
             prev_mean = pyr_mean_z[lev - 1]
             prev_val = pyr_valid[lev - 1]
-            # children: (cur_dim, 2, cur_dim, 2) → reorder to (cur_dim, cur_dim, 2, 2) → flatten last two to 4
-            children_mean = prev_mean.reshape(cur_dim, 2, cur_dim, 2).transpose(0, 2, 1, 3).reshape(cur_dim, cur_dim, 4)
-            children_valid = prev_val.reshape(cur_dim, 2, cur_dim, 2).transpose(0, 2, 1, 3).reshape(cur_dim, cur_dim, 4)
-
-            # Vectorised max gradient across all 6 pairs of 4 children
-            max_grad = np.zeros((cur_dim, cur_dim), dtype=np.float32)
-            for i in range(4):
-                for j in range(i + 1, 4):
-                    both = children_valid[:, :, i] & children_valid[:, :, j]
-                    diff = np.abs(children_mean[:, :, i] - children_mean[:, :, j])
-                    max_grad = np.maximum(max_grad, np.where(both, diff, 0.0))
+            # The greatest pairwise difference is the range of valid means.
+            shape = (cur_dim, 2, cur_dim, 2)
+            child_mean = prev_mean.reshape(shape)
+            child_valid = prev_val.reshape(shape)
+            highest = np.max(child_mean, axis=(1, 3), where=child_valid, initial=-np.inf)
+            lowest = np.min(child_mean, axis=(1, 3), where=child_valid, initial=np.inf)
+            max_grad = np.where(pyr_valid[lev], highest - lowest, 0.0)
 
             cm &= (max_grad <= gradient_threshold)
 
@@ -326,6 +322,7 @@ class AdaptiveQuadtreeMap:
                 x_idx=np.concatenate(all_col0), y_idx=np.concatenate(all_row0),
                 level=np.concatenate(all_levels).astype('u1'),
                 flags=np.concatenate(all_dyns).astype('u1') | 6 | ((np.concatenate(all_counts) > 0).astype('u1') << 3),
+                span_z=np.concatenate(all_span_z),
                 z_min_cm=np.clip(np.rint(np.concatenate(all_min_z) * 100), -32768, 32767).astype('<i2'),
                 z_max_cm=np.clip(np.rint(np.concatenate(all_max_z) * 100), -32768, 32767).astype('<i2'))
             cat_ids = np.concatenate(all_cell_ids).tolist()
@@ -336,7 +333,7 @@ class AdaptiveQuadtreeMap:
             cat_min_z = np.concatenate(all_min_z).tolist()
             cat_max_z = np.concatenate(all_max_z).tolist()
             cat_mean_z = np.concatenate(all_mean_z).tolist()
-            cat_span_z = np.concatenate(all_span_z).tolist()
+            cat_span_z = self.leaf_arrays["span_z"].tolist()
             cat_counts = np.concatenate(all_counts).tolist()
             cat_dyns = np.concatenate(all_dyns).tolist()
 
@@ -391,14 +388,15 @@ class AdaptiveQuadtreeMap:
         if self._leaf_id_grid is None:
             if not hasattr(self, '_is_leaf'):
                 raise RuntimeError('Call build() first')
-            dense = np.full((self.cfg.grid_dim, self.cfg.grid_dim), -1, dtype=np.int32)
-            offset = 0
-            for level, mask in enumerate(self._is_leaf):
+            offset = len(self.leaves)
+            dense = None
+            for mask in reversed(self._is_leaf):
                 n = int(mask.sum())
-                ids = np.full(mask.shape, -1, dtype=np.int32)
-                ids[mask] = np.arange(offset, offset + n)
-                expanded = ids.repeat(1 << level, 0).repeat(1 << level, 1)
-                dense[expanded >= 0] = expanded[expanded >= 0]
-                offset += n
+                offset -= n
+                dense = (
+                    np.full(mask.shape, -1, dtype=np.int32) if dense is None
+                    else dense.repeat(2, axis=0).repeat(2, axis=1)
+                )
+                dense[mask] = np.arange(offset, offset + n, dtype=np.int32)
             self._leaf_id_grid = dense
         return self._leaf_id_grid

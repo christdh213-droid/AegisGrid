@@ -197,8 +197,12 @@ async def socket_session(ws, binary):
     queue.put_nowait((state.revision, state.latest_binary))
     send_lock = asyncio.Lock()
     async def send_frames():
+        last_revision = -1
         while True:
-            _, payload = await queue.get()
+            revision, payload = await queue.get()
+            if revision <= last_revision:
+                continue
+            last_revision = revision
             if binary:
                 frame_id = HEADER.unpack_from(payload)[3]
                 # Pack timing is captured for this frame, independently of delivery.

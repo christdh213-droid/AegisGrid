@@ -4,15 +4,39 @@ const $=id=>document.getElementById(id),canvas=$('rightCanvas'),ctx=canvas.getCo
 const raster=$('leftCanvas'),rctx=raster.getContext('2d'),transform=new Transform();
 let latest=null,socket=null,retry=500,polling=false,pollTimer=null,wipe=.5,drag=null,playing=false;
 let drawCount=0,received=0,lastStats=performance.now(),latency=null,receivedHz=null;
+const trackLabels = new Map();
+const labelCounts = {VEH:0,PED:0};
+let lastFrameId = -1;
 window.viewerDiagnostics={renderFps:null,receivedFps:null,latencyMs:null,framesReceived:0,errors:[]};
 const palette=['#cf9269','#74b4ac','#4f9eab','#265779','#152c51'];
 const lut=Array.from({length:256},(_,i)=>i===0?[6,8,16]:[Math.round(25+156*i/255),Math.round(10+35*i/255),Math.round(22+35*i/255)]);
 function resize(){const dpr=devicePixelRatio||1;canvas.width=Math.round(innerWidth*dpr);canvas.height=Math.round(innerHeight*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);transform.resize(innerWidth,innerHeight);}
 addEventListener('resize',resize);resize();
 function showError(error){$('error').textContent=String(error);window.viewerDiagnostics.errors.push(String(error));}
+function displayTracks(tracks) {
+  return (tracks ?? []).filter(track => track.age >= 3 && track.speed >= 0.4).flatMap(track => {
+    const [x, y] = track.centroid ?? [track.x, track.y];
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
+    const kind = ['PED','PEDESTRIAN'].includes(track.class ?? track.classification) ? 'PED' : 'VEH';
+    let label = track.label;
+    if (!label && track.track_id != null) {
+      if (!trackLabels.has(track.track_id)) {
+        trackLabels.set(track.track_id, `${kind}-${String(++labelCounts[kind]).padStart(2,'0')}`);
+      }
+      label = trackLabels.get(track.track_id);
+    }
+    return [{x,y,label,speed:track.speed}];
+  });
+}
 function receive(buffer){
   try {
     latest=decodeFrame(buffer);received++;window.viewerDiagnostics.framesReceived++;
+    if (latest.frameId < lastFrameId) {
+      trackLabels.clear();
+      labelCounts.VEH = labelCounts.PED = 0;
+    }
+    lastFrameId = latest.frameId;
+    latest.displayTracks = displayTracks(latest.meta.dynamic_tracks);
     latency=Date.now()-latest.serverTime;window.viewerDiagnostics.latencyMs=latency;
     const image=rctx.createImageData(GRID.dim,GRID.dim);
     for(let row=0;row<GRID.dim;row++)for(let col=0;col<GRID.dim;col++){
@@ -24,12 +48,24 @@ function receive(buffer){
     const m=latest.meta.metrics,e=latest.meta.extras;
     $('metrics').textContent=`Frame ${latest.frameId} · Reduction ${m.cell_reduction_pct.toFixed(2)}% · Memory ${m.memory_saved_pct.toFixed(2)}% (est.) · RMSE ${m.obstacle_rmse_m.toFixed(4)} m · Ghosts ${m.ghost_cells_detected} · E2E ${latency.toFixed(1)} ms · Server ${e.server_fps?.toFixed(1)??'—'} FPS · Pack+send ${e.encode_ms?.toFixed(2)??'—'} ms (prior sample)`;
     if(e.runtime_config)$('speed').value=String(e.runtime_config.speed);
+    if(e.safe_pct != null){
+      $('perception').textContent = `SOR removed ${e.filtered_noise_points} · IMU ${e.imu_pitch_deg.toFixed(1)}° / ${e.imu_roll_deg.toFixed(1)}° ${e.tilt_corrected ? '(levelled)' : ''} · Risk ${e.safe_pct.toFixed(1)}% safe / ${e.caution_pct.toFixed(1)}% caution / ${e.hazard_pct.toFixed(1)}% hazard / ${e.unknown_pct.toFixed(1)}% unknown`;
+    }
   }catch(error){showError(error);}
 }
 async function poll(){
   if(!polling)return;
-  try{const response=await fetch('/api/frame',{headers:{Accept:'application/octet-stream'},cache:'no-store'});if(!response.ok)throw Error('REST '+response.status);receive(await response.arrayBuffer());$('connection').textContent='REST polling · Reconnecting';}catch(error){$('connection').textContent='Reconnecting';}
-  pollTimer=setTimeout(poll,100);
+  try {
+    const response=await fetch('/api/frame',{headers:{Accept:'application/octet-stream'},cache:'no-store'});
+    if(!response.ok)throw Error('REST '+response.status);
+    const buffer=await response.arrayBuffer();
+    if (!polling || socket?.readyState === WebSocket.OPEN) return;
+    receive(buffer);
+    $('connection').textContent='REST polling · Reconnecting';
+  } catch(error) {
+    if (polling) $('connection').textContent='Reconnecting';
+  }
+  if (polling) pollTimer=setTimeout(poll,100);
 }
 function fallback(){if(!polling){polling=true;poll();}}
 function connect(){
@@ -70,7 +106,30 @@ function draw(now){
     ctx.save();ctx.beginPath();ctx.rect(divider,0,width-divider,height);ctx.clip();
     for(let i=0;i<latest.n;i++){const r=transform.cellRect(latest.x[i],latest.y[i],latest.level[i]);ctx.fillStyle=palette[latest.level[i]];ctx.fillRect(r.x,r.y,r.width,r.height);if(r.width>=4){ctx.strokeStyle='#668198';ctx.lineWidth=.4;ctx.strokeRect(r.x,r.y,r.width,r.height);}}ctx.restore();
     // World overlays intentionally sit outside both wipe clips.
-    for(const track of latest.meta.dynamic_tracks){const point=transform.worldToScreen(track.x,track.y);ctx.strokeStyle='#9de1bc';ctx.lineWidth=1;ctx.strokeRect(point.x-4,point.y-4,8,8);ctx.fillStyle='#e5e9ef';ctx.font='11px ui-monospace,Consolas,monospace';ctx.fillText(`#${track.track_id}`,point.x+7,point.y);}
+    const occupiedTags = [];
+    ctx.font = '11px ui-monospace,Consolas,monospace';
+    for (const track of latest.displayTracks) {
+      const point = transform.worldToScreen(track.x, track.y);
+      ctx.strokeStyle = '#9de1bc';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(point.x-4,point.y-4,8,8);
+      if (!track.label) continue;
+      const text = `${track.label} · ${track.speed.toFixed(1)} m/s`;
+      const tagWidth = ctx.measureText(text).width + 8;
+      if (tagWidth > width) continue;
+      const x = Math.max(0, Math.min(point.x + 7, width - tagWidth));
+      for (const offset of [0, -16, 16, -32, 32]) {
+        const y = point.y + offset - 11;
+        if (y < 0 || y + 15 > height) continue;
+        if (occupiedTags.some(tag => x < tag.right && x + tagWidth > tag.x && y < tag.y + 15 && y + 15 > tag.y)) continue;
+        occupiedTags.push({x,y,right:x+tagWidth});
+        ctx.fillStyle = '#050811dd';
+        ctx.fillRect(x,y,tagWidth,15);
+        ctx.fillStyle = '#e5e9ef';
+        ctx.fillText(text,x+4,y+11);
+        break;
+      }
+    }
     const ego=transform.worldToScreen(0,0);ctx.fillStyle='#c9e4ee';ctx.beginPath();ctx.arc(ego.x,ego.y,4,0,Math.PI*2);ctx.fill();
     ctx.strokeStyle='#b6c5d5';ctx.beginPath();ctx.moveTo(divider,0);ctx.lineTo(divider,height);ctx.stroke();drawCount++;
   }

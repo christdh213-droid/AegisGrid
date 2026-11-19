@@ -28,7 +28,7 @@ def updated_config(config, updates):
             raise ValueError(f'Unknown setting: {key}')
         if isinstance(getattr(defaults, key), bool) and type(value) is not bool:
             raise ValueError(f'{key} must be boolean')
-        ranges = {'outlier_ratio': (0, .15), 'speed': (.5, 2), 'pitch_deg': (-30, 30), 'roll_deg': (-30, 30), 'imu_noise_deg': (0, 5)}
+        ranges = {'outlier_ratio': (0, .15), 'speed': (.5, 2), 'pitch_deg': (-8, 8), 'roll_deg': (-8, 8), 'imu_noise_deg': (0, 5)}
         if key in ranges:
             lo, hi = ranges[key]
             if type(value) not in (float, int) or not math.isfinite(value) or not lo <= value <= hi:
@@ -57,13 +57,14 @@ class StreamState:
         self.lock = threading.RLock()
         self.config = PipelineConfig()
         self.runtime = RuntimeConfig()
-        self.pipeline = PerceptionPipeline(self.config)
+        self.pipeline = PerceptionPipeline(self.config, perception=True)
         self.stream = SyntheticLidarStream(self.config)
         self.is_playing = False
         self.target_fps = min(30.0, self.max_fps)
         self.current_frame = None
         self.latest_binary = None
         self.revision = 0
+        self.published_revision = -1
         self.completions = deque(maxlen=120)
         self.pack_samples = deque(maxlen=300)
         self.pack_by_frame = {}
@@ -74,6 +75,7 @@ class StreamState:
 
     def _step(self):
         snapshot = self.runtime  # frozen, remains valid for the whole frame
+        self.stream.runtime_config = snapshot
         points, metadata = next(self.stream)
         metadata['runtime_config'] = snapshot
         frame = self.pipeline.process_frame(points, metadata=metadata)
@@ -162,19 +164,19 @@ class StreamState:
 
     def publish(self):
         """Called only on the event loop. Every subscriber owns a one-frame slot."""
+        if self.revision <= self.published_revision:
+            return
+        self.published_revision = self.revision
         for queue in tuple(self.subscribers):
             if queue.full():
                 queue.get_nowait()
             queue.put_nowait((self.revision, self.latest_binary))
 
     async def run(self):
-        last = -1
         deadline = asyncio.get_running_loop().time()
         while True:
-            revision, _ = await asyncio.to_thread(self.tick)
-            if revision != last:
-                self.publish()
-                last = revision
+            await asyncio.to_thread(self.tick)
+            self.publish()
             interval = 1 / min(self.max_fps, self.target_fps * self.runtime.speed)
             deadline += interval
             now = asyncio.get_running_loop().time()

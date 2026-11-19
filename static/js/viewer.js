@@ -1,3 +1,4 @@
+import {paintBaseline,drawAdaptive,drawRibbon,drawActor,drawRadar,drawEgo,drawBeam} from './sceneStyle.js';
 import {Transform,GRID} from './transform.js';
 import {decodeFrame} from './protocol.js';
 const $=id=>document.getElementById(id),canvas=$('rightCanvas'),ctx=canvas.getContext('2d');
@@ -27,7 +28,7 @@ function updateConnection(text, live = false) {
 }
 function setMode(value) {
   mode = value;
-  $('riskLegend').hidden = mode !== 'risk';
+  $('riskLegend').hidden = false;
   document.querySelector('.modes').style.setProperty('--active', ['split','elevation','quadtree','risk'].indexOf(mode));
   $('wipe').hidden = mode !== 'split';
   $('baselineLabel').hidden = mode !== 'split';
@@ -79,12 +80,7 @@ function receive(buffer){
     lastFrameId = latest.frameId;
     latest.displayTracks = displayTracks(latest.meta.dynamic_tracks);
     latency=Date.now()-latest.serverTime;window.viewerDiagnostics.latencyMs=latency;
-    const image=rctx.createImageData(GRID.dim,GRID.dim);
-    for(let row=0;row<GRID.dim;row++)for(let col=0;col<GRID.dim;col++){
-      const color=lut[latest.raster[row*GRID.dim+col]],i=transform.rasterIndex(col,row);
-      image.data[i]=color[0];image.data[i+1]=color[1];image.data[i+2]=color[2];image.data[i+3]=255;
-    }
-    rctx.putImageData(image,0,0);
+    paintBaseline(latest,raster);
     $('adaptiveLabel').textContent=`Adaptive Quadtree 2.5D Map - ${latest.n.toLocaleString()} cells`;
     const m=latest.meta.metrics,e=latest.meta.extras;
     latencyHistory.push([m.adaptive_latency_ms,m.fixed_latency_ms]);if(latencyHistory.length>60)latencyHistory.shift();
@@ -243,49 +239,22 @@ function draw(now){
     const extent=transform.extentRect();
     if (mode === 'split') {
     ctx.save();ctx.beginPath();ctx.rect(0,0,mode === 'split' ? divider : width,height);ctx.clip();ctx.imageSmoothingEnabled=false;ctx.drawImage(raster,extent.x,extent.y,extent.width,extent.height);
-    if(transform.pixelsPerCell>=6){ctx.strokeStyle='#49303a';ctx.lineWidth=.5;ctx.beginPath();for(let i=0;i<=GRID.dim;i++){const a=transform.gridToScreen(i,0),b=transform.gridToScreen(i,GRID.dim),c=transform.gridToScreen(0,i),d=transform.gridToScreen(GRID.dim,i);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.moveTo(c.x,c.y);ctx.lineTo(d.x,d.y);}ctx.stroke();}ctx.restore();
+    if(transform.pixelsPerCell>=6){ctx.strokeStyle='#33415544';ctx.lineWidth=.5;ctx.beginPath();for(let i=0;i<=GRID.dim;i++){const a=transform.gridToScreen(i,0),b=transform.gridToScreen(i,GRID.dim),c=transform.gridToScreen(0,i),d=transform.gridToScreen(GRID.dim,i);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.moveTo(c.x,c.y);ctx.lineTo(d.x,d.y);}ctx.stroke();}ctx.restore();
     }
     {
     const left = mode === 'split' ? divider : 0;
     ctx.save();ctx.beginPath();ctx.rect(left,0,width-left,height);ctx.clip();
-    for(let i=0;i<latest.n;i++){const r=transform.cellRect(latest.x[i],latest.y[i],latest.level[i]);ctx.fillStyle=mode === 'risk' ? riskPalette[(latest.flags[i] >> 1) & 3] : mode === 'elevation' ? `rgb(${lut[Math.max(1,Math.min(255,Math.round((latest.zMax[i]/100+2)*254/8)+1))].join(',')})` : palette[latest.level[i]];ctx.fillRect(r.x,r.y,r.width,r.height);if(r.width>=4){ctx.strokeStyle='rgba(148,197,255,0.18)';ctx.lineWidth=.4;ctx.strokeRect(r.x,r.y,r.width,r.height);}}ctx.restore();
+    drawAdaptive(ctx,latest,transform,mode);ctx.restore();
     }
-    // World overlays intentionally sit outside both wipe clips.
-    const route = latest.meta.extras;
-    ctx.save();
-    if (route.planned_path?.length) {
-      ctx.beginPath();
-      route.planned_path.forEach(([x,y],i)=>{
-        const point=transform.worldToScreen(x,y);
-        if(i)ctx.lineTo(point.x,point.y);else ctx.moveTo(point.x,point.y);
-      });
-      const blocked = route.path_status === 'BLOCKED';
-      const gradient=ctx.createLinearGradient(0,height,width,0);gradient.addColorStop(0,'#45a9ea');gradient.addColorStop(1,'#91ffe1');
-      ctx.strokeStyle = blocked ? '#b6ac9590' : gradient;ctx.shadowColor='#65eddb';ctx.shadowBlur=blocked?0:12;ctx.lineCap='round';ctx.lineJoin='round';
-      ctx.lineWidth = blocked ? 2 : 4;
-      if(blocked)ctx.setLineDash([7,8]);
-      ctx.stroke();
-    }
-    if (route.goal_xy) {
-      const goal=transform.worldToScreen(...route.goal_xy);
-      ctx.setLineDash([]);
-      ctx.strokeStyle = route.path_status === 'BLOCKED' ? '#ffc36e' : '#6ef5dc';
-      ctx.lineWidth=2;ctx.beginPath();ctx.arc(goal.x,goal.y,reducedMotion.matches?8:8+2*Math.sin(now/350),0,Math.PI*2);ctx.stroke();
-    }
-    ctx.restore();
+    if(mode==='split')drawBeam(ctx,divider,height);
+    // World overlays remain seamless across the wipe.
+    drawRadar(ctx,transform);
+    drawRibbon(ctx,latest.meta.extras,transform,now,reducedMotion.matches);
     const occupiedTags = [];
     ctx.font = '11px ui-monospace,Consolas,monospace';
     for (const track of latest.displayTracks) {
       const point = transform.worldToScreen(track.x, track.y);
-      ctx.strokeStyle = '#9de1bc';
-      ctx.lineWidth = 1;
-      ctx.save();ctx.shadowColor='#9de1bc';ctx.shadowBlur=6;
-      const scale=transform.pixelsPerCell/.25;
-      if(track.kind==='PED'){ctx.beginPath();ctx.arc(point.x,point.y,Math.max(3,scale*.3),0,Math.PI*2);ctx.stroke();}
-      else {const w=Math.max(6,(track.width??1)*scale),h=Math.max(9,(track.length??2)*scale);ctx.strokeRect(point.x-w/2,point.y-h/2,w,h);ctx.fillStyle='#b4ddd9';ctx.fillRect(point.x-w*.3,point.y-h*.3,w*.6,h*.4);}
-      // Render supplied points only; no client-side trajectory inference.
-      if(Array.isArray(track.predicted_path) && track.predicted_path.length>1){ctx.beginPath();ctx.moveTo(point.x,point.y);for(const xy of track.predicted_path){if(xy.length!==2 || !xy.every(Number.isFinite))continue;const p=transform.worldToScreen(...xy);ctx.lineTo(p.x,p.y);}ctx.globalAlpha=.55;ctx.lineJoin='round';ctx.stroke();}
-      ctx.restore();
+      drawActor(ctx,track,transform);
       if (!track.label) continue;
       const text = `${track.label} | ${track.speed.toFixed(1)} m/s`;
       const tagWidth = ctx.measureText(text).width + 8;
@@ -296,19 +265,14 @@ function draw(now){
         if (y < 0 || y + 15 > height) continue;
         if (occupiedTags.some(tag => x < tag.right && x + tagWidth > tag.x && y < tag.y + 15 && y + 15 > tag.y)) continue;
         occupiedTags.push({x,y,right:x+tagWidth});
-        ctx.fillStyle = '#050811dd';
-        ctx.fillRect(x,y,tagWidth,15);
+        ctx.fillStyle = 'rgba(27,47,65,.88)';
+        ctx.beginPath();ctx.roundRect(x,y,tagWidth,15,4);ctx.fill();ctx.strokeStyle='#bde8ff40';ctx.lineWidth=.6;ctx.stroke();
         ctx.fillStyle = '#e5e9ef';
         ctx.fillText(text,x+4,y+11);
         break;
       }
     }
-    const ego=transform.worldToScreen(0,0);ctx.save();ctx.strokeStyle='#93bfd32b';ctx.lineWidth=1;
-    for(const radius of [10,20,30]){ctx.beginPath();ctx.arc(ego.x,ego.y,radius*transform.pixelsPerCell/.25,0,Math.PI*2);ctx.stroke();}
-    ctx.translate(ego.x,ego.y);ctx.shadowColor='#c5fff0';ctx.shadowBlur=16;ctx.fillStyle='#d7f8ee';ctx.beginPath();ctx.roundRect(-6,-10,12,20,4);ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='#244658';ctx.fillRect(-4,-5,8,5);ctx.fillRect(-8,-6,2,12);ctx.fillRect(6,-6,2,12);ctx.restore();
-    if (mode === 'split') {
-      ctx.strokeStyle='#9fdaed';ctx.beginPath();ctx.moveTo(divider,0);ctx.lineTo(divider,height);ctx.stroke();
-    }
+    drawEgo(ctx,transform);
     drawCount++;
   }
   if(now-lastStats>=1000){const seconds=(now-lastStats)/1000;const fps=drawCount/seconds;receivedHz=received/seconds;$('fps').textContent=`Render ${fps.toFixed(1)} FPS · Received ${receivedHz.toFixed(1)} Hz`;Object.assign(window.viewerDiagnostics,{renderFps:fps,receivedFps:receivedHz}); if(socket?.readyState===1)updateConnection(`LIVE ${fps.toFixed(0)} FPS`,true); if(fps<20 && latest){lowFpsSince ??= now; if(now-lowFpsSince>=3000)document.body.classList.add('lite');}else lowFpsSince=null;drawCount=0;received=0;lastStats=now;}

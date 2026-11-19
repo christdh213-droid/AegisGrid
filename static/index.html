@@ -4,6 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>DRDO SIH26053 — LiDAR viewer</title>
   <link rel="stylesheet" href="/static/viewer.css">
+  <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
   <canvas id="rightCanvas" tabindex="0" aria-label="LiDAR map. Drag to pan, pinch or scroll to zoom. Use goal coordinates in the dock for keyboard destination entry."></canvas>
@@ -30,6 +31,14 @@
     </div>
     <svg id="latencyChart" viewBox="0 0 280 45" role="img" aria-label="Mapping latency history: adaptive cyan, fixed amber"><polyline id="adaptiveLine"/><polyline id="fixedLine"/></svg><small>Mapping latency · adaptive / fixed (ms)</small>
     <div class="chips"><span id="rmseChip"></span><span id="ghostChip"></span></div><p id="radioRate" hidden></p><p id="metrics">Waiting for frame</p>
+    <section id="riskLegend" aria-label="Traversability legend">
+      <h2>Traversability</h2><div class="safety-gradient" aria-hidden="true"></div><div class="safety-labels"><span>Safe</span><span>Caution</span><span>Hazard</span></div>
+      <div id="riskBar" class="risk-bar" hidden aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div class="legend">
+        <span><i></i> Safe <b id="safe">—</b></span><span><i></i> Caution <b id="caution">—</b></span>
+        <span><i></i> Hazard <b id="hazard">—</b></span><span><i></i> Unknown <b id="unknown">—</b></span>
+      </div>
+    </section>
     <section>
       <h2>Perception</h2>
       <label class="setting">Dust &amp; Rain Filter (SOR)<input type="checkbox" role="switch" aria-checked="false" data-config="sor_enabled" checked></label>
@@ -39,14 +48,7 @@
       <label class="setting">IMU Slope Levelling<input type="checkbox" role="switch" aria-checked="false" data-config="imu_levelling_enabled" checked></label>
       <div id="tiltControls" hidden><label class="setting">Tilt mode<select id="tiltMode"><option>Auto</option><option>Manual</option></select></label><div id="manualTilt" hidden><label>Pitch <output id="pitchValue">0°</output><input id="pitch" aria-label="Pitch degrees" type="range" min="-8" max="8" step="0.5" value="0"></label><label>Roll <output id="rollValue">0°</output><input id="roll" aria-label="Roll degrees" type="range" min="-8" max="8" step="0.5" value="0"></label></div></div><span id="uncompensated" class="warning" hidden>UNCOMPENSATED</span><p id="perception"></p>
     </section>
-    <section id="riskLegend" aria-label="Traversability legend" hidden>
-      <h2>Traversability</h2>
-      <div id="riskBar" class="risk-bar" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-      <div class="legend">
-        <span><i></i> Safe <b id="safe">—</b></span><span><i></i> Caution <b id="caution">—</b></span>
-        <span><i></i> Hazard <b id="hazard">—</b></span><span><i></i> Unknown <b id="unknown">—</b></span>
-      </div>
-    </section>
+
     <section aria-label="Path planner">
       <label class="setting">A* Auto-Path Planner<input type="checkbox" role="switch" aria-checked="false" data-config="planner_enabled" checked></label>
       <p id="routeStatus" role="status">Click the map to set a destination.</p>

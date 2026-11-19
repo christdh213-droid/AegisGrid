@@ -1,0 +1,95 @@
+{
+  "scope": "Session 7 replacement Ship Check; no benchmark or stress matrix",
+  "tests": {
+    "passed": 64,
+    "seconds": 16.35,
+    "warnings": 1
+  },
+  "defaults_golden": {
+    "frames": 90,
+    "max_rmse_m": 0.00870020376455675,
+    "ghosts": 0,
+    "min_cell_reduction_pct": 79.92958815138547,
+    "min_estimated_memory_saved_pct": 81.83685302734375
+  },
+  "clean_checkout": {
+    "revision": "e05686b",
+    "python": "3.13",
+    "fresh_venv": true,
+    "pinned_wheels_installed": true,
+    "pip_check": "No broken requirements found",
+    "readme_start_command": " .\\.venv\\Scripts\\python.exe prototype_app.py --host 0.0.0.0",
+    "environment": {
+      "PORT": "8766",
+      "MAX_FPS": "12",
+      "DISABLE_PROCESS_POOL": "1"
+    },
+    "http_status": {
+      "/": 200,
+      "/healthz": 200,
+      "/api/scene_layout": 200
+    },
+    "websocket": {
+      "frames": 20,
+      "first_frame": 1,
+      "last_frame": 20,
+      "received_hz": 11.454480947865775
+    }
+  },
+  "browser": {
+    "checks": {
+      "connected": true,
+      "sor_enabled": true,
+      "outlier_ratio": true,
+      "simulate_hill_tilt": true,
+      "tilt_mode": true,
+      "pitch_deg": true,
+      "roll_deg": true,
+      "imu_levelling_enabled": true,
+      "uncompensated": true,
+      "planner_enabled": true,
+      "view_elevation": true,
+      "view_quadtree": true,
+      "view_risk": true,
+      "view_split": true,
+      "governor_profile": true,
+      "governor": true,
+      "hidden_hud": true,
+      "shown_hud": true,
+      "wipe": true,
+      "tooltip": true,
+      "goal_click": true,
+      "pan": true,
+      "aria_switches": true,
+      "keyboard_modes": true,
+      "keyboard_hud": true,
+      "pinch": true,
+      "upload": true,
+      "static_live_controls_disabled": true,
+      "static_planner": true,
+      "return_live": true,
+      "error_toast": true
+    },
+    "diagnostics": {
+      "renderFps": 48.79992032666067,
+      "receivedFps": 8.963250672243797,
+      "latencyMs": 30.2099609375,
+      "framesReceived": 46,
+      "errors": [],
+      "drawMs": 0.09999999403953552,
+      "receiveMs": 7.5999999940395355,
+      "architectureBuilds": 1
+    },
+    "request_hosts": [
+      "127.0.0.1:8766"
+    ],
+    "exceptions": [],
+    "health_http_status": 200
+  },
+  "limits": [
+    "Large-window sustained 60+ render FPS not met",
+    "Track IDs can reacquire across map-edge wrap",
+    "Earlier terrain and full-planner latency targets remain open",
+    "Docker and hosted TLS deployment not tested; Docker unavailable"
+  ]
+}

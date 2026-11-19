@@ -13,7 +13,7 @@ $env:DISABLE_PROCESS_POOL = '1'
 
 Open [the local viewer](http://127.0.0.1:8766/) and click **Play**. A green **LIVE** indicator means the WebSocket is connected. Verify that the frame number advances. The [health endpoint](http://127.0.0.1:8766/healthz) returns HTTP 200 and `{"status":"ok"}`. For local access only, pass `--host 127.0.0.1` instead.
 
-**Upload LiDAR** previews .csv files with x,y,z columns and little-endian float32 XYZI .bin files up to 8 MiB. The browser displays a fixed-grid elevation view of the file. The live telemetry dock continues to describe the simulation. Use **Return to live** to restore its map.
+**Upload LiDAR** accepts CSV, BIN and NPY scans up to 50 MiB and 1,000,000 points. The uploaded scan replaces the shared live scene with a static frame processed by SOR, traversability and planning. Use **Return to Live Sim** to restore the simulation. See the static scan details below.
 
 `PORT` defaults to 8000 locally. `MAX_FPS` caps automatic playback even at 2× speed. It sets a scheduling cap, and actual delivery depends on compute and network load. Set `DISABLE_PROCESS_POOL=0` to enable the optional separate-process fixed-grid route benchmark. The adaptive route works with either setting.
 

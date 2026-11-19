@@ -135,8 +135,8 @@ class SyntheticLidarStream:
     Generates realistic synthetic 64 m × 64 m LiDAR point clouds at ~10 Hz.
 
     Features:
-      • Gently undulating terrain with road crown
-      • Static obstacles (barriers, walls, boulders, pillars)
+      • Flat boulevards, 16 cm curbs and open compound courtyards
+      • Metric building facades/roofs, barriers, parked cars and lamps
       • 4 dynamic actors (2 vehicles + 2 pedestrians) moving smoothly
       • Optional dust/rain outlier injection for Codex filter testing
     """
@@ -173,7 +173,7 @@ class SyntheticLidarStream:
             # Pedestrian 1: moving +Y
             {"x": -6.25, "y": -20.0, "vx": 0.0, "vy": 1.4,
              "hw": 0.35, "hl": 0.35, "h": 1.7, "type": "PEDESTRIAN"},
-            # Pedestrian 2: moving diagonally
+            # Pedestrian 2: moving -Y on the opposite sidewalk
             {"x": 6.25, "y": 15.0, "vx": 0.0, "vy": -1.1,
              "hw": 0.35, "hl": 0.35, "h": 1.6, "type": "PEDESTRIAN"},
         ]

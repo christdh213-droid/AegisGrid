@@ -24,13 +24,17 @@ def main():
                 assert urllib.request.urlopen('http://127.0.0.1:8766/healthz', timeout=1).status == 200
                 break
             except OSError: time.sleep(.1)
-        with tempfile.TemporaryDirectory(prefix='sih-session6-') as profile:
+        with tempfile.TemporaryDirectory(prefix='sih-session6-', ignore_cleanup_errors=True) as profile:
             browser = subprocess.Popen([str(chrome), '--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--hide-scrollbars', f'--user-data-dir={profile}', '--remote-debugging-port=0', '--window-size=1600,1100', 'about:blank'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
             for _ in range(100):
                 portfile = Path(profile)/'DevToolsActivePort'
-                if portfile.exists(): break
-                time.sleep(.1)
-            port = portfile.read_text().splitlines()[0]
+                try:
+                    port = portfile.read_text().splitlines()[0]
+                    break
+                except (OSError, IndexError):
+                    time.sleep(.1)
+            else:
+                raise RuntimeError('Chrome debugging port did not become readable')
             tab = next(t for t in json.load(urllib.request.urlopen(f'http://127.0.0.1:{port}/json')) if t['type']=='page')
             events=[]; counter=0; checks={}
             with connect(tab['webSocketDebuggerUrl'], max_size=20_000_000) as ws:

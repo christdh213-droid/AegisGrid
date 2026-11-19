@@ -10,12 +10,12 @@
   <canvas id="rightCanvas" tabindex="0" aria-label="LiDAR map. Drag to pan, pinch or scroll to zoom. Use goal coordinates in the dock for keyboard destination entry."></canvas>
   <canvas id="leftCanvas" hidden width="256" height="256"></canvas>
   <header>
-    <div class="glass identity"><div class="mark" aria-hidden="true">◈</div><div><div class="eyebrow">SIH26053 / DRDO</div><strong>Adaptive 2.5D LiDAR</strong></div></div>
+    <div class="glass identity"><div class="mark" aria-hidden="true">◈</div><div><div class="eyebrow">SIH26053 · DRDO</div><strong>Adaptive 2.5D LiDAR</strong></div></div>
     <nav class="glass modes" aria-label="Map mode">
-      <button data-mode="split" aria-pressed="true">Split Wipe</button>
-      <button data-mode="elevation" aria-pressed="false">Elevation</button>
-      <button data-mode="quadtree" aria-pressed="false">Quadtree</button>
-      <button data-mode="risk" aria-pressed="false">Traversability</button>
+      <button data-mode="split" data-view="Split Wipe" aria-pressed="true"><svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4 3v14M10 3v14M2 3h14v14H2z"/></svg><span>Split Wipe</span></button>
+      <button data-mode="elevation" data-view="Elevation" aria-pressed="false"><svg viewBox="0 0 18 18" aria-hidden="true"><path d="M2 15l5-9 4 6 3-4 3 7z"/></svg><span>Elevation</span></button>
+      <button data-mode="quadtree" data-view="Quadtree" aria-pressed="false"><svg viewBox="0 0 18 18" aria-hidden="true"><path d="M2 2h14v14H2zM2 9h14M9 2v14M9 5h7M12 2v7"/></svg><span>Quadtree</span></button>
+      <button data-mode="risk" data-view="Traversability" aria-pressed="false"><svg viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2l8 14H1zM9 7v4M9 13v1"/></svg><span>Traversability</span></button>
     </nav>
     <div class="glass live-tools"><span id="connection" role="status">Connecting</span><button id="hideHud" aria-expanded="true" aria-controls="telemetry">Hide HUD</button><button id="upload">Upload LiDAR</button><input id="file" type="file" accept=".bin,.npy,.csv" hidden></div>
   </header>
@@ -29,7 +29,7 @@
       <div><span>Cell reduction</span><strong id="reduction">—</strong></div>
       <div><span>Memory saved (est.)</span><strong id="memory">—</strong></div>
     </div>
-    <svg id="latencyChart" viewBox="0 0 280 45" role="img" aria-label="Mapping latency history: adaptive cyan, fixed amber"><polyline id="adaptiveLine"/><polyline id="fixedLine"/></svg><small>Mapping latency · adaptive / fixed (ms)</small>
+    <svg id="latencyChart" viewBox="0 0 280 45" role="img" aria-label="Mapping latency history: adaptive cyan, fixed amber"><defs><linearGradient id="latencyFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#67e8f9" stop-opacity=".3"/><stop offset="100%" stop-color="#67e8f9" stop-opacity="0"/></linearGradient></defs><polygon id="latencyArea" fill="url(#latencyFill)"/><polyline id="adaptiveLine"/><polyline id="fixedLine"/></svg><small>Mapping latency · adaptive / fixed (ms)</small>
     <div class="chips"><span id="rmseChip"></span><span id="ghostChip"></span></div><p id="radioRate" hidden></p><p id="metrics">Waiting for frame</p>
     <section id="riskLegend" aria-label="Traversability legend">
       <h2>Traversability</h2><div class="safety-gradient" aria-hidden="true"></div><div class="safety-labels"><span>Safe</span><span>Caution</span><span>Hazard</span></div>
@@ -72,7 +72,7 @@
     <button id="home">Reset view</button><button id="returnLive" hidden>Return to Live Sim</button>
   </footer>
   <div id="tooltip" class="glass" role="tooltip" hidden></div>
-  <output id="error" role="status"></output>
+  <div id="pathChip" class="glass" role="status"></div><output id="error" role="status"></output>
   <script type="module" src="/static/js/viewer.js"></script>
 </body>
 </html>

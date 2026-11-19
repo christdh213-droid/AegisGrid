@@ -1,8 +1,13 @@
-import {paintBaseline,drawAdaptive,drawRibbon,drawActor,drawRadar,drawEgo,drawBeam} from './sceneStyle.js';
+import {ArchitectureLayer} from './cartography.js';
+import {paintBaseline,drawAdaptive,drawRibbon,drawActor,drawRadar,drawEgo,drawBeam,drawActivity} from './sceneStyle.js';
 import {Transform,GRID} from './transform.js';
 import {decodeFrame} from './protocol.js';
 const $=id=>document.getElementById(id),canvas=$('rightCanvas'),ctx=canvas.getContext('2d');
 const raster=$('leftCanvas'),rctx=raster.getContext('2d'),transform=new Transform();
+const architecture=new ArchitectureLayer();
+const composedLayer=document.createElement('canvas');let composedKey='';
+const adaptiveLayer=document.createElement('canvas');let adaptiveKey='',frameRevision=0;
+const wakes=new Map();
 let latest=null,socket=null,retry=500,polling=false,pollTimer=null,wipe=.5,drag=null,playing=false;
 let mode = 'split', hudHidden = false, lowFpsSince = null;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -14,6 +19,7 @@ let drawCount=0,received=0,lastStats=performance.now(),latency=null,receivedHz=n
 const latencyHistory=[];
 const trackLabels = new Map();
 const labelCounts = {VEH:0,PED:0};
+architecture.load().catch(error=>showError(error.message));
 let lastFrameId = -1;
 window.viewerDiagnostics={renderFps:null,receivedFps:null,latencyMs:null,framesReceived:0,errors:[]};
 const palette=['#cf9269','#74b4ac','#4f9eab','#265779','#152c51'];
@@ -38,7 +44,7 @@ function setMode(value) {
   });
 }
 document.querySelectorAll('[data-mode]').forEach(button => {
-  button.onclick = () => { setMode(button.dataset.mode); command({action:'configure',settings:{view_mode:button.textContent}}); };
+  button.onclick = () => { setMode(button.dataset.mode); command({action:'configure',settings:{view_mode:button.dataset.view}}); };
 });
 $('returnLive').onclick = () => command({action:'return_live'});
 $('upload').onclick = () => $('file').click();
@@ -71,14 +77,17 @@ function displayTracks(tracks) {
   });
 }
 function receive(buffer){
+  const receiveStart=performance.now();
   try {
-    latest=decodeFrame(buffer);localScan=latest.meta.extras.source_mode==='upload';$('returnLive').hidden=!localScan;setMode(mode);received++;window.viewerDiagnostics.framesReceived++;
+    frameRevision++;latest=decodeFrame(buffer);localScan=latest.meta.extras.source_mode==='upload';$('returnLive').hidden=!localScan;setMode(mode);received++;window.viewerDiagnostics.framesReceived++;
     if (latest.frameId < lastFrameId) {
-      trackLabels.clear();
+      trackLabels.clear();wakes.clear();
       labelCounts.VEH = labelCounts.PED = 0;
     }
     lastFrameId = latest.frameId;
     latest.displayTracks = displayTracks(latest.meta.dynamic_tracks);
+    const activeIds=new Set();for(const track of latest.displayTracks){const key=track.track_id??track.label;activeIds.add(key);const history=wakes.get(key)??[];history.push([track.x,track.y]);if(history.length>8)history.shift();wakes.set(key,history);track.wake=history;}
+    for(const key of wakes.keys())if(!activeIds.has(key))wakes.delete(key);
     latency=Date.now()-latest.serverTime;window.viewerDiagnostics.latencyMs=latency;
     paintBaseline(latest,raster);
     $('adaptiveLabel').textContent=`Adaptive Quadtree 2.5D Map - ${latest.n.toLocaleString()} cells`;
@@ -92,9 +101,11 @@ function receive(buffer){
     $('reduction').classList.toggle('warning',m.cell_reduction_pct<65);$('memory').classList.toggle('warning',m.memory_saved_pct<60);
     $('pathTime').textContent=e.plan_time_ms==null?'Path Time: not measured':`Path Time: ${e.plan_time_ms.toFixed(2)} ms`;
     $('routeStatus').dataset.status=e.path_status??'';
+    $('pathChip').textContent=e.path_status??'PLANNER OFF';$('pathChip').dataset.status=e.path_status??'';
+    const endX=(latencyHistory.length-1)*280/59;$('latencyArea').setAttribute('points',`0,45 ${$('adaptiveLine').getAttribute('points')} ${endX},45`);
     $('reduction').textContent = `${m.cell_reduction_pct.toFixed(1)}%`;
     $('memory').textContent = `${m.memory_saved_pct.toFixed(1)}%`;
-    $('metrics').textContent = `Frame ${latest.frameId} · RMSE ${m.obstacle_rmse_m.toFixed(4)} m · Ghosts ${m.ghost_cells_detected} · Transport ${latency.toFixed(1)} ms`;
+    $('metrics').textContent = `Frame ${latest.frameId} · RMSE ${m.obstacle_rmse_m.toFixed(4)} m · Ghosts ${m.ghost_cells_detected} · Frame age ${latency.toFixed(1)} ms`;
     if(e.runtime_config) syncControls(e.runtime_config);
     $('routeStatus').textContent = (e.path_status ? `${e.path_status}${e.path_reason ? ' · ' + e.path_reason : ''} · Click map to set goal` : 'Route planner is off');
     $('routeCompare').hidden = e.fixed_plan_ms == null;
@@ -120,6 +131,7 @@ function receive(buffer){
       });
     }
   }catch(error){showError(error);}
+  window.viewerDiagnostics.receiveMs=performance.now()-receiveStart;
 }
 async function poll(){
   if(!polling)return;
@@ -151,7 +163,7 @@ async function command(message){
   if(socket?.readyState===1){socket.send(JSON.stringify(message));return;}
   try{const response=await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(message)});const result=await response.json();if(!response.ok)throw Error(result.detail);playing=result.playing;if(result.config)syncControls(result.config);if(['step','reset','set_goal'].includes(message.action)){const frame=await fetch('/api/frame',{headers:{Accept:'application/octet-stream'}});receive(await frame.arrayBuffer());}}catch(error){showError(error);}
 }
-for(const action of ['play','pause','step','reset'])$(action).onclick=()=>{if(action==='reset'){trackLabels.clear();labelCounts.VEH=labelCounts.PED=0;transform.reset();wipe=.5;$('wipe').style.left='50%';}command({action});};
+for(const action of ['play','pause','step','reset'])$(action).onclick=()=>{if(action==='reset'){trackLabels.clear();wakes.clear();labelCounts.VEH=labelCounts.PED=0;transform.reset();wipe=.5;$('wipe').style.left='50%';}command({action});};
 $('home').onclick=()=>transform.reset();$('speed').onchange=event=>command({action:'configure',settings:{speed:Number(event.target.value)}});
 const configToggles = [...document.querySelectorAll('[data-config]')];
 function syncControls(config) {
@@ -232,11 +244,18 @@ handle.onpointerup=handle.onpointercancel=()=>wiping=false;
 handle.onkeydown=event=>{if(['ArrowLeft','ArrowRight'].includes(event.key)){event.preventDefault();wipe=Math.max(.02,Math.min(.98,wipe+(event.key==='ArrowLeft'?-.02:.02)));handle.style.left=`${wipe*100}%`;}};
 addEventListener('keydown',event=>{if(event.target.matches('button,select,input,textarea') || event.target.isContentEditable)return;if(event.key.toLowerCase()==='h')toggleHud();if(event.key==='0')transform.reset();if(event.code==='Space'){event.preventDefault();command({action:playing?'pause':'play'});}if(event.key==='ArrowRight')command({action:'step'});});
 function draw(now){
+  const drawStart=performance.now();
   const width=innerWidth,height=innerHeight,divider=width*wipe;
-  const targetWidth=mapWidth(); transform.resize(reducedMotion.matches?targetWidth:transform.width+(targetWidth-transform.width)*.12,height);
+  const targetWidth=mapWidth(); transform.resize(reducedMotion.matches || Math.abs(targetWidth-transform.width)<.1?targetWidth:transform.width+(targetWidth-transform.width)*.18,height);
+  const viewKey=[frameRevision,mode,width,height,devicePixelRatio,transform.width.toFixed(2),transform.zoom,transform.panX,transform.panY,wipe,!!architecture.layout].join(':');
+  if(composedKey!==viewKey){composedKey=viewKey;composedLayer.width=canvas.width;composedLayer.height=canvas.height;
+  const ctx=composedLayer.getContext('2d');ctx.setTransform(devicePixelRatio||1,0,0,devicePixelRatio||1,0,0);
   ctx.fillStyle='#050811';ctx.fillRect(0,0,width,height);
   if(latest){
     const extent=transform.extentRect();
+    const registeredScene=!localScan && !(latest.meta.extras.runtime_config?.simulate_hill_tilt && !latest.meta.extras.tilt_corrected);
+    if(registeredScene){const base=architecture.render(transform,width,height,devicePixelRatio||1);if(base)ctx.drawImage(base,0,0,width,height);}
+    window.viewerDiagnostics.architectureBuilds=architecture.builds;
     if (mode === 'split') {
     ctx.save();ctx.beginPath();ctx.rect(0,0,mode === 'split' ? divider : width,height);ctx.clip();ctx.imageSmoothingEnabled=false;ctx.drawImage(raster,extent.x,extent.y,extent.width,extent.height);
     if(transform.pixelsPerCell>=6){ctx.strokeStyle='#33415544';ctx.lineWidth=.5;ctx.beginPath();for(let i=0;i<=GRID.dim;i++){const a=transform.gridToScreen(i,0),b=transform.gridToScreen(i,GRID.dim),c=transform.gridToScreen(0,i),d=transform.gridToScreen(GRID.dim,i);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.moveTo(c.x,c.y);ctx.lineTo(d.x,d.y);}ctx.stroke();}ctx.restore();
@@ -244,12 +263,14 @@ function draw(now){
     {
     const left = mode === 'split' ? divider : 0;
     ctx.save();ctx.beginPath();ctx.rect(left,0,width-left,height);ctx.clip();
-    drawAdaptive(ctx,latest,transform,mode);ctx.restore();
+    const layerKey=[frameRevision,mode,canvas.width,canvas.height,transform.width.toFixed(2),transform.zoom,transform.panX,transform.panY].join(':');
+    if(adaptiveKey!==layerKey){adaptiveKey=layerKey;adaptiveLayer.width=canvas.width;adaptiveLayer.height=canvas.height;const ac=adaptiveLayer.getContext('2d');ac.setTransform(devicePixelRatio||1,0,0,devicePixelRatio||1,0,0);drawAdaptive(ac,latest,transform,mode);}
+    ctx.drawImage(adaptiveLayer,0,0,width,height);ctx.restore();
     }
     if(mode==='split')drawBeam(ctx,divider,height);
     // World overlays remain seamless across the wipe.
-    drawRadar(ctx,transform);
-    drawRibbon(ctx,latest.meta.extras,transform,now,reducedMotion.matches);
+    drawRadar(ctx,transform,now,true);
+    drawRibbon(ctx,latest.meta.extras,transform,now,true);
     const occupiedTags = [];
     ctx.font = '11px ui-monospace,Consolas,monospace';
     for (const track of latest.displayTracks) {
@@ -265,6 +286,7 @@ function draw(now){
         if (y < 0 || y + 15 > height) continue;
         if (occupiedTags.some(tag => x < tag.right && x + tagWidth > tag.x && y < tag.y + 15 && y + 15 > tag.y)) continue;
         occupiedTags.push({x,y,right:x+tagWidth});
+        ctx.strokeStyle='#c6e7f066';ctx.lineWidth=.7;ctx.beginPath();ctx.moveTo(point.x,point.y);ctx.lineTo(x,y+7);ctx.stroke();ctx.fillStyle='#d5f6f3';ctx.beginPath();ctx.arc(point.x,point.y,1.5,0,Math.PI*2);ctx.fill();
         ctx.fillStyle = 'rgba(27,47,65,.88)';
         ctx.beginPath();ctx.roundRect(x,y,tagWidth,15,4);ctx.fill();ctx.strokeStyle='#bde8ff40';ctx.lineWidth=.6;ctx.stroke();
         ctx.fillStyle = '#e5e9ef';
@@ -272,10 +294,13 @@ function draw(now){
         break;
       }
     }
-    drawEgo(ctx,transform);
-    drawCount++;
+    drawEgo(ctx,transform,now,true);
   }
+  }
+  ctx.drawImage(composedLayer,0,0,width,height);
+  if(latest){drawActivity(ctx,latest.meta.extras,transform,now,reducedMotion.matches);drawCount++;}
   if(now-lastStats>=1000){const seconds=(now-lastStats)/1000;const fps=drawCount/seconds;receivedHz=received/seconds;$('fps').textContent=`Render ${fps.toFixed(1)} FPS · Received ${receivedHz.toFixed(1)} Hz`;Object.assign(window.viewerDiagnostics,{renderFps:fps,receivedFps:receivedHz}); if(socket?.readyState===1)updateConnection(`LIVE ${fps.toFixed(0)} FPS`,true); if(fps<20 && latest){lowFpsSince ??= now; if(now-lowFpsSince>=3000)document.body.classList.add('lite');}else lowFpsSince=null;drawCount=0;received=0;lastStats=now;}
+  window.viewerDiagnostics.drawMs=performance.now()-drawStart;
   requestAnimationFrame(draw);
 }
 connect();setTimeout(()=>{if(socket?.readyState!==1)fallback();},1500);requestAnimationFrame(draw);

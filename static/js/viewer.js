@@ -13,6 +13,7 @@ let localScan = false;
 const localRaster = document.createElement('canvas');
 localRaster.width = localRaster.height = GRID.dim;
 let drawCount=0,received=0,lastStats=performance.now(),latency=null,receivedHz=null;
+const latencyHistory=[];
 const trackLabels = new Map();
 const labelCounts = {VEH:0,PED:0};
 let lastFrameId = -1;
@@ -39,7 +40,7 @@ function setMode(value) {
   });
 }
 document.querySelectorAll('[data-mode]').forEach(button => {
-  button.onclick = () => { closeLocalScan(); setMode(button.dataset.mode); };
+  button.onclick = () => { setMode(button.dataset.mode); command({action:'configure',settings:{view_mode:button.textContent}}); };
 });
 function closeLocalScan() {
   localScan = false;
@@ -105,6 +106,15 @@ function receive(buffer){
     rctx.putImageData(image,0,0);
     $('adaptiveLabel').textContent=`Adaptive Quadtree · ${latest.n.toLocaleString()} cells`;
     const m=latest.meta.metrics,e=latest.meta.extras;
+    latencyHistory.push([m.adaptive_latency_ms,m.fixed_latency_ms]);if(latencyHistory.length>60)latencyHistory.shift();
+    const maxLatency=Math.max(1,...latencyHistory.flat());
+    ['adaptiveLine','fixedLine'].forEach((id,j)=>$(id).setAttribute('points',latencyHistory.map((v,i)=>`${i*280/59},${43-v[j]/maxLatency*40}`).join(' ')));
+    $('latencyChart').setAttribute('aria-label',`Mapping latency: adaptive ${m.adaptive_latency_ms.toFixed(2)} ms, fixed ${m.fixed_latency_ms.toFixed(2)} ms`);
+    $('rmseChip').textContent=`${m.obstacle_rmse_m.toFixed(4)} m RMSE`;$('rmseChip').classList.toggle('warning',m.obstacle_rmse_m>.05);
+    $('ghostChip').textContent=`${m.ghost_cells_detected} Ghost Trails`;$('ghostChip').classList.toggle('warning',m.ghost_cells_detected!==0);
+    $('reduction').classList.toggle('warning',m.cell_reduction_pct<65);$('memory').classList.toggle('warning',m.memory_saved_pct<60);
+    $('pathTime').textContent=e.plan_time_ms==null?'Path Time: not measured':`Path Time: ${e.plan_time_ms.toFixed(2)} ms`;
+    $('routeStatus').dataset.status=e.path_status??'';
     $('reduction').textContent = `${m.cell_reduction_pct.toFixed(1)}%`;
     $('memory').textContent = `${m.memory_saved_pct.toFixed(1)}%`;
     $('metrics').textContent = `Frame ${latest.frameId} · RMSE ${m.obstacle_rmse_m.toFixed(4)} m · Ghosts ${m.ghost_cells_detected} · Transport ${latency.toFixed(1)} ms`;
@@ -126,7 +136,7 @@ function receive(buffer){
       }
     }
     if(e.safe_pct != null){
-      $('perception').textContent = `Filtered ${e.filtered_noise_points} points · IMU ${e.imu_pitch_deg.toFixed(1)}° / ${e.imu_roll_deg.toFixed(1)}°${e.tilt_corrected ? ' (levelled)' : ''}`;
+      $('perception').textContent = `Filtered ${e.filtered_noise_points} points · IMU ${e.imu_pitch_deg?.toFixed(1)??'—'}° / ${e.imu_roll_deg?.toFixed(1)??'—'}°${e.tilt_corrected ? ' (levelled)' : ''}`;
       ['safe','caution','hazard','unknown'].forEach((key, i) => {
         const share = e[`${key}_pct`];
         $(key).textContent = `${share.toFixed(1)}%`;
@@ -170,6 +180,12 @@ $('home').onclick=()=>transform.reset();$('speed').onchange=event=>command({acti
 const configToggles = [...document.querySelectorAll('[data-config]')];
 function syncControls(config) {
   $('speed').value = String(config.speed);
+  $('dustControls').hidden=!config.sor_enabled;
+  $('tiltControls').hidden=!config.simulate_hill_tilt;
+  $('manualTilt').hidden=config.tilt_mode!=='Manual';$('tiltMode').value=config.tilt_mode;
+  $('uncompensated').hidden=!config.simulate_hill_tilt || config.imu_levelling_enabled;
+  for(const axis of ['pitch','roll'])if(document.activeElement!==$(axis)){$(axis).value=config[axis+'_deg'];$(axis+'Value').textContent=`${config[axis+'_deg']}°`;}
+
   $('governorProfile').value = config.governor_profile ?? 'Unrestricted';
   for (const toggle of configToggles) toggle.checked = Boolean(config[toggle.dataset.config]);
   if (document.activeElement !== $('dust')) {
@@ -177,6 +193,8 @@ function syncControls(config) {
     $('dustValue').textContent = `${$('dust').value}%`;
   }
 }
+$('tiltMode').onchange=event=>command({action:'configure',settings:{tilt_mode:event.target.value}});
+for(const axis of ['pitch','roll']){$(axis).oninput=()=>$(axis+'Value').textContent=`${$(axis).value}°`;$(axis).onchange=()=>command({action:'configure',settings:{[axis+'_deg']:Number($(axis).value)}});}
 $('governorProfile').onchange = event => command({action:'set_profile',profile:event.target.value});
 for (const toggle of configToggles) {
   toggle.onchange = () => command({action:'configure',settings:{[toggle.dataset.config]:toggle.checked}});

@@ -756,3 +756,5 @@ Implemented exact view labels, elevation mode, dock-aware contain transform with
 Session 6 step 3.2: four-pixel click/pan distinction, pinch zoom, H toggle, client-side typed-array tooltip. Fixed raster has only quantized max Z, so min Z and risk are explicitly unavailable there. No invented fixed measurements; adaptive inspection shows all received fields. JS syntax checked.
 
 Session 6 step 3.3: polished unclipped route ribbon, pulsing goal (static under reduced motion), 10/20/30 m rings, ego silhouette, class markers and nonoverlapping tags. Optional incoming predicted_path is drawn as supplied with round joins; this branch does not generate forecasts or route on individual predictions. JS syntax checked.
+
+Session 6 step 3.4: dock includes measured latency sparkline, golden-threshold chips, filter controls, manual/auto tilt controls and uncompensated warning, planner timing/sample age, profile controls and emulation/estimated telemetry. View selections also send configure/view_mode. No seeking control because source has no seeking API. JS syntax checked.

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DRDO SIH26053 — LiDAR viewer</title>
+  <link rel="stylesheet" href="/static/viewer.css">
+</head>
+<body>
+  <canvas id="rightCanvas" aria-label="Baseline and adaptive LiDAR split map"></canvas>
+  <canvas id="leftCanvas" hidden width="256" height="256"></canvas>
+  <header><strong>DRDO SIH26053 · Adaptive 2.5D LiDAR</strong><span id="connection">Connecting</span><span id="fps">Render FPS —</span><a href="/legacy">Legacy viewer</a></header>
+  <div class="labels"><span>Baseline Fixed 0.25 m Grid · 65,536 cells</span><span id="adaptiveLabel">Adaptive Quadtree</span></div>
+  <button id="wipe" aria-label="Move split divider" title="Drag or use left/right arrows">↔</button>
+  <footer>
+    <button id="play">Play</button><button id="pause">Pause</button><button id="step">Step</button><button id="reset">Reset</button>
+    <label>Speed <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
+    <button id="home">Reset view</button><span id="metrics">Waiting for frame</span>
+  </footer>
+  <output id="error" role="status"></output>
+  <script type="module" src="/static/js/viewer.js"></script>
+</body>
+</html>

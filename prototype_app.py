@@ -92,108 +92,141 @@ class DashboardState:
         return d
 
 
-state = DashboardState()
-active_websockets: list[WebSocket] = []
+# Session 1 binary service; the original DashboardState remains for baseline recon.
+from pathlib import Path
+from fastapi import Request, HTTPException
+from fastapi.responses import Response, FileResponse
+from fastapi.staticfiles import StaticFiles
+from src.stream_runtime import StreamState
+from src.stream_protocol import HEADER
+import contextlib
 
+state = StreamState()
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# ── REST API Endpoints ────────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app):
+    task = asyncio.create_task(state.run())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+app.router.lifespan_context = lifespan
+
+async def control(message):
+    try:
+        ack = await asyncio.to_thread(state.execute, message)
+    except (ValueError, TypeError) as error:
+        raise HTTPException(400, str(error)) from error
+    if message.get("action") in ("step", "reset"):
+        state.publish()
+    return ack
+
+async def frame_response(request):
+    if "application/octet-stream" in request.headers.get("accept", ""):
+        if state.current_frame is None:
+            await asyncio.to_thread(state.tick)
+        payload = state.latest_binary
+        return Response(payload, media_type="application/octet-stream", headers={"Cache-Control": "no-store"})
+    return JSONResponse(await asyncio.to_thread(state.legacy_payload))
 
 @app.get("/api/frame")
-async def get_frame():
-    """Get the latest processed frame."""
-    return JSONResponse(state.latest_payload or state.step_frame())
+async def get_frame(request: Request):
+    return await frame_response(request)
 
+@app.post("/api/control")
+async def configure(request: Request):
+    try:
+        message = await request.json()
+    except ValueError as error:
+        raise HTTPException(400, "Invalid JSON") from error
+    return await control(message)
 
 @app.post("/api/step")
-async def step_frame():
-    """Advance the simulation by 1 frame."""
-    with state.lock:
-        data = state.step_frame()
-    return JSONResponse(data)
+async def step_frame(request: Request):
+    await control({"action": "step"})
+    return await frame_response(request)
 
+@app.post("/api/reset")
+async def reset_simulation(request: Request):
+    await control({"action": "reset"})
+    return await frame_response(request)
 
 @app.post("/api/play")
 async def play_simulation():
-    """Start continuous simulation."""
-    state.is_playing = True
-    return {"status": "playing", "fps": state.target_fps}
-
+    return await control({"action": "play"})
 
 @app.post("/api/pause")
 async def pause_simulation():
-    """Pause continuous simulation."""
-    state.is_playing = False
-    return {"status": "paused"}
-
-
-@app.post("/api/reset")
-async def reset_simulation():
-    """Reset stream and pipeline to frame 0."""
-    with state.lock:
-        state.is_playing = False
-        data = state.reset()
-    return JSONResponse(data)
-
+    return await control({"action": "pause"})
 
 @app.post("/api/speed")
 async def set_speed(fps: float):
-    """Set simulation speed in frames per second (1 to 30)."""
-    state.target_fps = max(1.0, min(30.0, fps))
-    return {"fps": state.target_fps}
+    return await control({"action": "set_speed", "fps": fps})
 
+@app.post("/api/upload")
+async def upload_stub():
+    raise HTTPException(501, "Upload parsing is scheduled for Session 6")
 
-# ── WebSocket Streaming Endpoint ──────────────────────────────────────────
+@app.get("/api/stream-stats")
+async def stream_statistics():
+    return await asyncio.to_thread(state.statistics)
+
+@app.websocket("/ws/stream")
+async def binary_stream(ws: WebSocket):
+    await socket_session(ws, binary=True)
 
 @app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
-    """Real-time bi-directional streaming channel."""
+async def legacy_stream(ws: WebSocket):
+    await socket_session(ws, binary=False)
+
+async def socket_session(ws, binary):
     await ws.accept()
-
-    # Immediately push current frame
-    if state.latest_payload:
-        await ws.send_text(json.dumps(state.latest_payload))
-
-    async def _stream_producer():
-        try:
-            while True:
-                if state.is_playing:
-                    with state.lock:
-                        data = state.step_frame()
-                    await ws.send_text(json.dumps(data))
-                    await asyncio.sleep(1.0 / state.target_fps)
-                else:
-                    await asyncio.sleep(0.05)
-        except (asyncio.CancelledError, WebSocketDisconnect):
-            pass
-
-    stream_task = asyncio.create_task(_stream_producer())
-
+    if state.current_frame is None:
+        await asyncio.to_thread(state.tick)
+    queue = asyncio.Queue(maxsize=1)
+    state.subscribers.add(queue)
+    queue.put_nowait((state.revision, state.latest_binary))
+    send_lock = asyncio.Lock()
+    async def send_frames():
+        while True:
+            _, payload = await queue.get()
+            if binary:
+                frame_id = HEADER.unpack_from(payload)[3]
+                # Pack timing is captured for this frame, independently of delivery.
+                pack_ms = state.pack_by_frame.get(frame_id, 0.)
+                async with send_lock:
+                    started = time.perf_counter()
+                    await ws.send_bytes(payload)
+                    elapsed = (time.perf_counter() - started) * 1000
+                await asyncio.to_thread(state.record_send, frame_id, pack_ms, elapsed)
+            else:
+                data = await asyncio.to_thread(state.legacy_payload)
+                async with send_lock:
+                    await ws.send_json(data)
+    sender = asyncio.create_task(send_frames())
     try:
         while True:
-            msg = await ws.receive_text()
-            cmd = json.loads(msg)
-            action = cmd.get("action")
-
-            if action == "step":
-                with state.lock:
-                    data = state.step_frame()
-                await ws.send_text(json.dumps(data))
-            elif action == "play":
-                state.is_playing = True
-            elif action == "pause":
-                state.is_playing = False
-            elif action == "reset":
-                with state.lock:
-                    state.is_playing = False
-                    data = state.reset()
-                await ws.send_text(json.dumps(data))
-            elif action == "set_speed":
-                state.target_fps = max(1.0, min(30.0, float(cmd.get("fps", 10.0))))
-
-    except (WebSocketDisconnect, Exception):
+            try:
+                message = await ws.receive_json()
+                ack = await control(message)
+                if binary:
+                    async with send_lock:
+                        await ws.send_json(ack)
+            except (HTTPException, ValueError, TypeError) as error:
+                async with send_lock:
+                    await ws.send_json({"type": "error", "message": str(getattr(error, "detail", error))})
+    except WebSocketDisconnect:
         pass
     finally:
-        stream_task.cancel()
+        state.subscribers.discard(queue)
+        sender.cancel()
+        with contextlib.suppress(asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+            await sender
 
 
 # ── Self-Contained HTML5 Canvas Frontend ──────────────────────────────────
@@ -1071,10 +1104,15 @@ HTML_CONTENT = """<!DOCTYPE html>
 """
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/legacy", response_class=HTMLResponse)
 async def get_index():
     """Serves the standalone single-file HTML5 Canvas dashboard."""
     return HTML_CONTENT
+
+
+@app.get("/")
+async def spatial_viewer():
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 def main():
@@ -1094,7 +1132,9 @@ def main():
     print(f"  Press Ctrl+C to terminate.")
     print(f"{'='*72}\n")
 
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    # Binary raster/SoA is already compact; deflate adds avoidable send latency.
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info",
+                ws_per_message_deflate=False)
 
 
 if __name__ == "__main__":

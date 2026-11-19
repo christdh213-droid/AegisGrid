@@ -12,7 +12,7 @@ from typing import Generator, Optional
 import numpy as np
 
 from src.config import PipelineConfig
-from src.schemas import AdaptiveCell, FrameOutput
+from src.schemas import AdaptiveCell, FrameOutput, default_frame_extras
 from src.hooks import (
     DefaultPreProcessHook,
     DefaultPostMapHook,
@@ -39,11 +39,19 @@ class PerceptionPipeline:
         pre_hook=None,
         post_hook=None,
         stream_callback=None,
+        source_hook=None,
+        pre_map_hook=None,
+        post_track_hook=None,
+        post_frame_hook=None,
     ):
         self.cfg = config
         self.pre_hook = pre_hook or DefaultPreProcessHook()
         self.post_hook = post_hook or DefaultPostMapHook()
         self.stream_callback = stream_callback or DefaultStreamCallbackHook()
+        self.source_hook = source_hook
+        self.pre_map_hook = pre_map_hook
+        self.post_track_hook = post_track_hook
+        self.post_frame_hook = post_frame_hook
 
         # Internal state
         self.fixed_map = FixedGridMap(config)
@@ -75,7 +83,10 @@ class PerceptionPipeline:
 
         timer = FrameTimer()
         t_start = time.perf_counter()
-        extras: dict = {}
+        extras = default_frame_extras()
+
+        if self.source_hook:
+            points, metadata = self.source_hook(points, metadata)
 
         # ── 0. Pre-process hook (Codex: SOR / IMU levelling) ─────────────
         points, hook_extras = self.pre_hook(points, metadata)
@@ -92,6 +103,8 @@ class PerceptionPipeline:
         self.fixed_map.update(points)
         timer.stop("fixed")
 
+        map_options = self.pre_map_hook(self.fixed_map, metadata.get('runtime_config')) if self.pre_map_hook else {}
+
         # ── 2. Dynamic detection ─────────────────────────────────────────
         timer.start("dynamic")
         dynamic_mask, tracks, ghost_count = self.tracker.process(
@@ -104,13 +117,16 @@ class PerceptionPipeline:
 
         # ── 3. Adaptive quadtree build ───────────────────────────────────
         timer.start("adaptive")
-        cells = self.adaptive_map.build(self.fixed_map, dynamic_mask)
+        cells = self.adaptive_map.build(self.fixed_map, dynamic_mask, **map_options)
         timer.stop("adaptive")
 
         # ── 4. Post-map hook (Codex: traversability) ─────────────────────
         cells, post_extras = self.post_hook(cells, self.cfg)
         if post_extras:
             extras.update(post_extras)
+        if self.post_track_hook:
+            cells, track_extras = self.post_track_hook(cells, tracks, self.cfg)
+            extras.update(track_extras)
 
         # ── 5. Metrics ───────────────────────────────────────────────────
         total_ms = (time.perf_counter() - t_start) * 1000.0
@@ -131,8 +147,11 @@ class PerceptionPipeline:
         )
 
         # ── 7. Stream callback (Codex: WebSocket / UI push) ─────────────
-        frame_dict = frame.to_dict()
-        self.stream_callback(frame_dict)
+        if self.post_frame_hook:
+            frame.extras.update(self.post_frame_hook(frame, self) or {})
+        # Avoid constructing thousands of dictionaries for a no-op callback.
+        if type(self.stream_callback) is not DefaultStreamCallbackHook:
+            self.stream_callback(frame.to_dict())
 
         self._frame_id += 1
         self._time += dt

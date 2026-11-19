@@ -1,0 +1,100 @@
+{
+  "compute": {
+    "frames": 300,
+    "stages": {
+      "generate": {
+        "p50": 4.552650003461167,
+        "p95": 18.09824002557435
+      },
+      "pre_process": {
+        "p50": 0.001300009898841381,
+        "p95": 0.0041300023440271685
+      },
+      "fixed": {
+        "p50": 4.497599991736934,
+        "p95": 16.3451900050859
+      },
+      "track": {
+        "p50": 5.367599995224737,
+        "p95": 19.508590002078563
+      },
+      "adaptive": {
+        "p50": 10.581499998806976,
+        "p95": 36.38131999614417
+      },
+      "post_map": {
+        "p50": 0.001700012944638729,
+        "p95": 0.006309989839792254
+      },
+      "wall": {
+        "p50": 29.10084999166429,
+        "p95": 95.87176500353962
+      },
+      "payload_bytes": {
+        "p50": 95230.0,
+        "p95": 98537.2
+      }
+    },
+    "pack_ms": {
+      "p50": 0.8341500069946051,
+      "p95": 3.726989998540377
+    },
+    "unpaced_fps": 24.82492675533428,
+    "golden": {
+      "max_rmse_m": 0.0,
+      "min_cell_reduction_pct": 90.10818566055295,
+      "min_memory_saved_pct": 92.99346923828125,
+      "ghost_cells_total": 0
+    }
+  },
+  "transport": {
+    "frames": 301,
+    "observed_server_fps": 20.935168827497886,
+    "pack_plus_asgi_send_ms": {
+      "p50": 0.6522000039694831,
+      "p95": 1.681370020378381
+    },
+    "note": "ASGI sink send; kernel/network send is measured by the real-server browser/WS probe"
+  },
+  "browser": {
+    "verified": true,
+    "diagnostics": {
+      "renderFps": 60.003934684241564,
+      "receivedFps": 14.755065905961041,
+      "latencyMs": 3.11865234375,
+      "framesReceived": 85,
+      "errors": []
+    },
+    "request_hosts": [
+      "127.0.0.1:8765"
+    ],
+    "console_exceptions": [],
+    "step_changed": true,
+    "reset_frame_zero": true,
+    "localhost_websocket": {
+      "pack": {
+        "count": 300,
+        "p50_ms": 0.4219000111334026,
+        "p95_ms": 1.6877549904165807
+      },
+      "pack_plus_send": {
+        "count": 300,
+        "p50_ms": 0.6566999945789576,
+        "p95_ms": 2.1397399919806066
+      },
+      "send": {
+        "count": 300,
+        "p50_ms": 0.21689999266527593,
+        "p95_ms": 0.7175350183388218
+      },
+      "server_fps": 15.823047798221403,
+      "payload_bytes": 93157,
+      "observed_receive_fps": 19.78657618521952
+    },
+    "wipe_moved": true,
+    "pan_changed": true,
+    "zoom_changed": true,
+    "rest_fallback": "REST polling \u00b7 Reconnecting",
+    "rest_step_changed": true
+  }
+}

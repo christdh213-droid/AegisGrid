@@ -116,11 +116,16 @@ class AdaptiveQuadtreeMap:
         self.cfg = config
         self.leaves: List[AdaptiveCell] = []
         self._dense_max_z: Optional[np.ndarray] = None
+        self._leaf_id_grid: Optional[np.ndarray] = None
 
     def build(
         self,
         fixed: FixedGridMap,
         dynamic_mask: np.ndarray,
+        *,
+        merge_height_threshold: float | None = None,
+        merge_gradient_threshold: float | None = None,
+        protected_mask: np.ndarray | None = None,
     ) -> List[AdaptiveCell]:
         """
         Build the adaptive quadtree from a populated FixedGridMap.
@@ -135,6 +140,10 @@ class AdaptiveQuadtreeMap:
         cfg = self.cfg
         dim = cfg.grid_dim           # 256
         max_level = cfg.max_quadtree_level  # 4
+        height_threshold = cfg.merge_height_threshold if merge_height_threshold is None else merge_height_threshold
+        gradient_threshold = cfg.merge_gradient_threshold if merge_gradient_threshold is None else merge_gradient_threshold
+        if protected_mask is not None and protected_mask.shape != fixed.count.shape:
+            raise ValueError("protected_mask must match the fixed grid")
 
         # ── Build pyramid arrays bottom-up ────────────────────────────────
         # Level 0: from fixed grid
@@ -198,6 +207,7 @@ class AdaptiveQuadtreeMap:
         # can_merge[lev] = bool (dim>>lev, dim>>lev): can the 2×2 block at
         # level lev-1 merge into this parent at level lev?
         can_merge = [None]  # level 0 has no merge concept (it IS the base)
+        protected = protected_mask
 
         for lev in range(1, max_level + 1):
             cur_dim = dim >> lev
@@ -205,10 +215,13 @@ class AdaptiveQuadtreeMap:
 
             # Rule 1: no dynamic children
             cm &= ~pyr_dyn[lev]
+            if protected is not None:
+                protected = protected.reshape(cur_dim, 2, cur_dim, 2).any(axis=(1, 3))
+                cm &= ~protected
 
             # Rule 2: combined span ≤ threshold (or entirely empty)
             span = pyr_max_z[lev] - pyr_min_z[lev]
-            cm &= (~pyr_valid[lev]) | (span <= cfg.merge_height_threshold)
+            cm &= (~pyr_valid[lev]) | (span <= height_threshold)
 
             # Rule 3: gradient between sibling children ≤ threshold
             prev_mean = pyr_mean_z[lev - 1]
@@ -225,7 +238,7 @@ class AdaptiveQuadtreeMap:
                     diff = np.abs(children_mean[:, :, i] - children_mean[:, :, j])
                     max_grad = np.maximum(max_grad, np.where(both, diff, 0.0))
 
-            cm &= (max_grad <= cfg.merge_gradient_threshold)
+            cm &= (max_grad <= gradient_threshold)
 
             can_merge.append(cm)
 
@@ -248,6 +261,7 @@ class AdaptiveQuadtreeMap:
         self._is_leaf = is_leaf
         self._pyr_max_z = pyr_max_z
         self._dense_max_z = None  # Invalidate cache
+        self._leaf_id_grid = None
 
         # ── Extract leaf cells (vectorised per level) ─────────────────────
         all_cell_ids = []
@@ -261,6 +275,8 @@ class AdaptiveQuadtreeMap:
         all_span_z = []
         all_counts = []
         all_dyns = []
+        all_col0 = []
+        all_row0 = []
 
         cell_id_counter = 0
 
@@ -274,6 +290,8 @@ class AdaptiveQuadtreeMap:
 
             rows = indices[:, 0]
             cols = indices[:, 1]
+            all_col0.append((cols << lev).astype('<u2'))
+            all_row0.append((rows << lev).astype('<u2'))
             n = len(rows)
 
             xs = (cols.astype(np.float64) + 0.5) * cell_size - cfg.half_size
@@ -302,6 +320,14 @@ class AdaptiveQuadtreeMap:
 
         # Concatenate all
         if all_cell_ids:
+            # Expose columns already produced by the pyramid for the binary encoder.
+            # This preserves the public AdaptiveCell list and all merge decisions.
+            self.leaf_arrays = dict(
+                x_idx=np.concatenate(all_col0), y_idx=np.concatenate(all_row0),
+                level=np.concatenate(all_levels).astype('u1'),
+                flags=np.concatenate(all_dyns).astype('u1') | 6 | ((np.concatenate(all_counts) > 0).astype('u1') << 3),
+                z_min_cm=np.clip(np.rint(np.concatenate(all_min_z) * 100), -32768, 32767).astype('<i2'),
+                z_max_cm=np.clip(np.rint(np.concatenate(all_max_z) * 100), -32768, 32767).astype('<i2'))
             cat_ids = np.concatenate(all_cell_ids).tolist()
             cat_xs = np.concatenate(all_xs).tolist()
             cat_ys = np.concatenate(all_ys).tolist()
@@ -324,6 +350,7 @@ class AdaptiveQuadtreeMap:
             ]
         else:
             leaves = []
+            self.leaf_arrays = {}
 
         self.leaves = leaves
         return leaves
@@ -357,3 +384,21 @@ class AdaptiveQuadtreeMap:
     def memory_kb(self) -> float:
         """Compact binary memory: num_leaves × LEAF_STRUCT_BYTES."""
         return len(self.leaves) * LEAF_STRUCT_BYTES / 1024.0
+
+    @property
+    def leaf_id_grid(self) -> np.ndarray:
+        """Lazy L0-to-leaf lookup; IDs index self.leaves, row 0 is south."""
+        if self._leaf_id_grid is None:
+            if not hasattr(self, '_is_leaf'):
+                raise RuntimeError('Call build() first')
+            dense = np.full((self.cfg.grid_dim, self.cfg.grid_dim), -1, dtype=np.int32)
+            offset = 0
+            for level, mask in enumerate(self._is_leaf):
+                n = int(mask.sum())
+                ids = np.full(mask.shape, -1, dtype=np.int32)
+                ids[mask] = np.arange(offset, offset + n)
+                expanded = ids.repeat(1 << level, 0).repeat(1 << level, 1)
+                dense[expanded >= 0] = expanded[expanded >= 0]
+                offset += n
+            self._leaf_id_grid = dense
+        return self._leaf_id_grid

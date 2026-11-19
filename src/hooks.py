@@ -95,3 +95,23 @@ class DefaultStreamCallbackHook:
     def __call__(self, frame_dict: Dict[str, Any]) -> None:
         pass
 
+
+class SourceHook(Protocol):
+    """# CODEX_HOOK: SOURCE -- sensor physics, before PRE_PROCESS."""
+    def __call__(self, points: np.ndarray, metadata: dict) -> tuple[np.ndarray, dict]: ...
+
+
+class PreMapHook(Protocol):
+    """# CODEX_HOOK: PRE_MAP -- return per-build keyword options (no-op default)."""
+    def __call__(self, fixed, runtime_config) -> dict: ...
+
+
+class PostTrackHook(Protocol):
+    """# CODEX_HOOK: POST_TRACK -- annotate cells after map and tracking."""
+    def __call__(self, cells, tracks, config) -> tuple[list[AdaptiveCell], dict]: ...
+
+
+class PostFrameHook(Protocol):
+    """# CODEX_HOOK: POST_FRAME -- planner/observer, before serialization."""
+    def __call__(self, frame, pipeline) -> dict: ...
+

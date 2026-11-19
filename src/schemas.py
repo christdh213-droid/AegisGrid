@@ -7,7 +7,55 @@ so `json.dumps()` never chokes on numpy scalars.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import List, Tuple, TypedDict
+
+
+class FrameExtras(TypedDict, total=False):
+    """Optional telemetry contract (SI units); None means not measured/implemented.
+
+    Percentages are 0..100. Radio rates are estimated MB/s, angles degrees.
+    Planner/governor/perception fields remain None until their sessions.
+    encode_ms is previous complete pack + transport sample; see encode_frame_id.
+    """
+    filtered_noise_points: int | None
+    noise_removal_pct: float | None
+    noise_recall_pct: float | None
+    true_points_lost_pct: float | None
+    imu_pitch_deg: float | None
+    imu_roll_deg: float | None
+    tilt_corrected: bool | None
+    safe_pct: float | None
+    caution_pct: float | None
+    hazard_pct: float | None
+    unknown_pct: float | None
+    planned_path: list[list[float]] | None
+    goal_xy: list[float] | None
+    path_status: str | None
+    plan_time_ms: float | None
+    nodes_expanded: int | None
+    fixed_grid_nodes_expanded: int | None
+    fixed_plan_ms: float | None
+    fixed_sample_age_s: float | None
+    adaptive_plan_ms: float | None
+    adaptive_nodes_expanded: int | None
+    nodes_saved_pct: float | None
+    governor_mode: str | None
+    governor_state: str | None
+    target_budget_ms: float | None
+    governed_latency_ms: float | None
+    active_merge_threshold: float | None
+    active_gradient_threshold: float | None
+    radio_mb_s_fixed: float | None
+    radio_mb_s_adaptive: float | None
+    encode_ms: float | None
+    encode_frame_id: int | None
+    server_fps: float | None
+    runtime_config: dict | None
+
+
+def default_frame_extras() -> FrameExtras:
+    """Stable wire shape without presenting missing measurements as zero."""
+    return {key: None for key in FrameExtras.__annotations__}
 
 
 def _float(v) -> float:
@@ -142,7 +190,7 @@ class FrameOutput:
     dynamic_tracks: List[DynamicTrack]
     metrics: FrameMetrics
     fixed_grid_shape: Tuple[int, int]
-    extras: dict = field(default_factory=dict)
+    extras: FrameExtras = field(default_factory=default_frame_extras)
 
     def to_dict(self) -> dict:
         return {

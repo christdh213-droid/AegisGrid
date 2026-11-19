@@ -65,3 +65,27 @@ class PipelineConfig:
         d = {k: v for k, v in d.items() if k not in ("grid_dim", "half_size")}
         return cls(**d)
 
+
+@dataclass(frozen=True)
+class RuntimeConfig:
+    """Immutable between-frame settings; module switches are scaffolding in Session 1.
+
+    goal_xy=None defers reachable-goal selection to the planner session.
+    """
+    outlier_ratio: float = 0.0
+    sor_enabled: bool = True
+    imu_levelling_enabled: bool = True
+    simulate_hill_tilt: bool = False
+    tilt_mode: str = "Auto"
+    pitch_deg: float = 0.0
+    roll_deg: float = 0.0
+    imu_noise_deg: float = 0.0
+    planner_enabled: bool = True
+    goal_xy: tuple[float, float] | None = None
+    governor_profile: str = "Unrestricted"
+    view_mode: str = "Split Wipe"
+    speed: float = 1.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+

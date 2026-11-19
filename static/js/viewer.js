@@ -183,25 +183,45 @@ for (const toggle of configToggles) {
 }
 $('dust').oninput = () => { $('dustValue').textContent = `${$('dust').value}%`; };
 $('dust').onchange = () => command({action:'configure',settings:{outlier_ratio:Number($('dust').value)/100}});
+const pointers=new Map(); let pinch=null;
+function inspectCell(event){
+  const tip=$('tooltip'); if(!latest || drag || localScan){tip.hidden=true;return;}
+  const world=transform.screenToWorld(event.clientX,event.clientY),g=transform.worldToGrid(world.x,world.y);
+  if(g.col<0 || g.row<0 || g.col>=256 || g.row>=256){tip.hidden=true;return;}
+  let detail;
+  if(mode==='split' && event.clientX<innerWidth*wipe){
+    const q=latest.raster[g.row*256+g.col];
+    detail=`0.25 m / L0 | Z max ${q?(-2+(q-1)*8/254).toFixed(2)+' m':'no data'} | Z min / Risk unavailable in fixed raster`;
+  }else{
+    const i=latest.x.findIndex((x,i)=>g.col>=x && g.col<x+2**latest.level[i] && g.row>=latest.y[i] && g.row<latest.y[i]+2**latest.level[i]);
+    if(i<0){tip.hidden=true;return;}
+    detail=`${.25*2**latest.level[i]} m / L${latest.level[i]} | Z min/max ${(latest.zMin[i]/100).toFixed(2)} / ${(latest.zMax[i]/100).toFixed(2)} m | ${['SAFE','CAUTION','HAZARD','UNKNOWN'][(latest.flags[i]>>1)&3]}`;
+  }
+  tip.textContent=`Coords ${world.x.toFixed(2)}, ${world.y.toFixed(2)} m | ${detail}`;
+  tip.hidden=false;tip.style.left=`${Math.max(8,Math.min(event.clientX+14,innerWidth-330))}px`;tip.style.top=`${Math.min(event.clientY+18,innerHeight-100)}px`;
+}
 canvas.onpointerdown=event=>{
-  if (event.button !== 0) return;
-  drag={x:event.clientX,y:event.clientY,moved:false};
-  canvas.setPointerCapture(event.pointerId);
+  if(event.button!==0)return;
+  pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});canvas.setPointerCapture(event.pointerId);
+  drag={x:event.clientX,y:event.clientY,startX:event.clientX,startY:event.clientY,moved:false};
+  if(pointers.size===2){const [a,b]=[...pointers.values()];pinch={distance:Math.hypot(a.x-b.x,a.y-b.y),x:(a.x+b.x)/2,y:(a.y+b.y)/2};drag.moved=true;}
+  $('tooltip').hidden=true;
 };
 canvas.onpointermove=event=>{
-  if (!drag) return;
-  if (!drag.moved && Math.hypot(event.clientX-drag.x,event.clientY-drag.y) <= 5) return;
-  transform.pan(event.clientX-drag.x,event.clientY-drag.y);
-  drag={x:event.clientX,y:event.clientY,moved:true};
+  if(!pointers.has(event.pointerId)){inspectCell(event);return;}
+  pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+  if(pointers.size===2){const [a,b]=[...pointers.values()],distance=Math.hypot(a.x-b.x,a.y-b.y),x=(a.x+b.x)/2,y=(a.y+b.y)/2;
+    if(pinch){transform.zoomAt(distance/Math.max(1,pinch.distance),pinch.x,pinch.y);transform.pan(x-pinch.x,y-pinch.y);}pinch={distance,x,y};return;}
+  if(!drag)return;
+  if(!drag.moved && Math.hypot(event.clientX-drag.startX,event.clientY-drag.startY)<=4)return;
+  transform.pan(event.clientX-drag.x,event.clientY-drag.y);Object.assign(drag,{x:event.clientX,y:event.clientY,moved:true});
 };
 canvas.onpointerup=event=>{
-  if (drag && !drag.moved && !localScan && latest?.meta.extras.runtime_config?.planner_enabled) {
-    const {x,y} = transform.screenToWorld(event.clientX,event.clientY);
-    command({action:'set_goal',goal_xy:[x,y]});
-  }
-  drag=null;
+  if(drag && !drag.moved && !pinch && !localScan && latest?.meta.extras.runtime_config?.planner_enabled){const {x,y}=transform.screenToWorld(event.clientX,event.clientY);command({action:'set_goal',goal_xy:[x,y]});}
+  pointers.delete(event.pointerId);pinch=null;drag=null;
 };
-canvas.onpointercancel=()=>drag=null;
+canvas.onpointercancel=()=>{pointers.clear();pinch=null;drag=null;};
+canvas.onpointerleave=()=>{$('tooltip').hidden=true;};
 canvas.onwheel=event=>{event.preventDefault();transform.zoomAt(Math.exp(-event.deltaY*.001),event.clientX,event.clientY);};
 canvas.ondblclick=()=>transform.reset();
 const handle=$('wipe');let wiping=false;
@@ -209,7 +229,7 @@ handle.onpointerdown=event=>{wiping=true;handle.setPointerCapture(event.pointerI
 handle.onpointermove=event=>{if(wiping){wipe=Math.max(.02,Math.min(.98,event.clientX/innerWidth));handle.style.left=`${wipe*100}%`;}};
 handle.onpointerup=handle.onpointercancel=()=>wiping=false;
 handle.onkeydown=event=>{if(['ArrowLeft','ArrowRight'].includes(event.key)){event.preventDefault();wipe=Math.max(.02,Math.min(.98,wipe+(event.key==='ArrowLeft'?-.02:.02)));handle.style.left=`${wipe*100}%`;}};
-addEventListener('keydown',event=>{if(event.target.matches('button,select,input'))return;if(event.key==='0')transform.reset();if(event.code==='Space'){event.preventDefault();command({action:playing?'pause':'play'});}if(event.key==='ArrowRight')command({action:'step'});});
+addEventListener('keydown',event=>{if(event.target.matches('button,select,input'))return;if(event.key.toLowerCase()==='h')toggleHud();if(event.key==='0')transform.reset();if(event.code==='Space'){event.preventDefault();command({action:playing?'pause':'play'});}if(event.key==='ArrowRight')command({action:'step'});});
 function draw(now){
   const width=innerWidth,height=innerHeight,divider=width*wipe;
   const targetWidth=mapWidth(); transform.resize(reducedMotion.matches?targetWidth:transform.width+(targetWidth-transform.width)*.12,height);

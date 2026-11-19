@@ -1,4 +1,6 @@
-# SIH26053 LiDAR viewer
+# AegisGrid — SIH26053 LiDAR viewer
+
+Real-time adaptive 2.5D LiDAR quadtree mapping, off-road traversability perception, and A* autonomous UGV navigation cockpit.
 
 Run the synthetic LiDAR demo with Python 3.13. From the repository root in PowerShell:
 

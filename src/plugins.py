@@ -59,6 +59,19 @@ class TraversabilityRiskHook:
     LABELS = ("SAFE", "CAUTION", "HAZARD", "UNKNOWN")
 
     @staticmethod
+    def neighbourhood_step(height, valid):
+        """Find each supported cell's largest step using separable 3×3 extrema."""
+        high = np.where(valid, height, -np.inf)
+        low = np.where(valid, height, np.inf)
+        for values, combine in ((high, np.maximum), (low, np.minimum)):
+            for axis in (0, 1):
+                view = values if axis == 0 else values.T
+                adjacent = combine(view[:-1], view[1:])
+                combine(view[:-1], adjacent, out=view[:-1])
+                combine(view[1:], adjacent, out=view[1:])
+        return np.where(valid, np.maximum(high - height, height - low), 0)
+
+    @staticmethod
     def classify(span, step, dynamic, supported, cfg):
         risk = np.zeros(len(span), dtype=np.uint8)
         risk[(span > cfg.caution_span_m) | (step > cfg.caution_step_m)] = 1
@@ -75,14 +88,7 @@ class TraversabilityRiskHook:
         flags = columns["flags"]
         supported = (flags & 8) != 0
         valid = supported[leaf_ids]
-        step = np.zeros_like(height)
-        for first, second in (
-            (np.s_[:-1, :], np.s_[1:, :]), (np.s_[:, :-1], np.s_[:, 1:]),
-            (np.s_[:-1, :-1], np.s_[1:, 1:]), (np.s_[1:, :-1], np.s_[:-1, 1:]),
-        ):
-            diff = np.where(valid[first] & valid[second], np.abs(height[first] - height[second]), 0)
-            np.maximum(step[first], diff, out=step[first])
-            np.maximum(step[second], diff, out=step[second])
+        step = self.neighbourhood_step(height, valid)
         leaf_step = np.zeros(len(flags), dtype=np.float32)
         np.maximum.at(leaf_step, leaf_ids.ravel(), step.ravel())
         cells = frame.adaptive_cells

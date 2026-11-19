@@ -67,3 +67,16 @@ def test_risk_boundaries_and_precedence():
     assert TraversabilityRiskHook.classify(spans, steps, dynamic, supported, cfg).tolist() == [
         0, 1, 1, 2, 1, 1, 2, 2, 3,
     ]
+
+
+def test_neighbourhood_step_matches_supported_eight_neighbours():
+    rng = np.random.default_rng(42)
+    height = rng.normal(size=(9, 13)).astype(np.float32)
+    supported = rng.random(height.shape) > .3
+    expected = np.zeros_like(height)
+    for y, x in np.argwhere(supported):
+        region = (slice(max(0, y - 1), y + 2), slice(max(0, x - 1), x + 2))
+        expected[y, x] = np.max(np.abs(height[region][supported[region]] - height[y, x]))
+    np.testing.assert_array_equal(
+        TraversabilityRiskHook.neighbourhood_step(height, supported), expected
+    )

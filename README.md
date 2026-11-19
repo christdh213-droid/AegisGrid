@@ -11,7 +11,9 @@ $env:DISABLE_PROCESS_POOL = '1'
 .\.venv\Scripts\python.exe prototype_app.py --host 0.0.0.0
 ```
 
-Open [the local viewer](http://127.0.0.1:8766/) and click **Play**. The status should show **WebSocket** and the frame number should advance. The [health endpoint](http://127.0.0.1:8766/healthz) returns HTTP 200 and `{"status":"ok"}`. For local access only, pass `--host 127.0.0.1` instead.
+Open [the local viewer](http://127.0.0.1:8766/) and click **Play**. A green **LIVE** indicator means the WebSocket is connected. Verify that the frame number advances. The [health endpoint](http://127.0.0.1:8766/healthz) returns HTTP 200 and `{"status":"ok"}`. For local access only, pass `--host 127.0.0.1` instead.
+
+**Upload LiDAR** previews .csv files with x,y,z columns and little-endian float32 XYZI .bin files up to 8 MiB. The browser displays a fixed-grid elevation view of the file. The live telemetry dock continues to describe the simulation. Use **Return to live** to restore its map.
 
 `PORT` defaults to 8000 locally. `MAX_FPS` caps automatic playback even at 2× speed. It sets a scheduling cap, and actual delivery depends on compute and network load. `DISABLE_PROCESS_POOL=1` is read by the runtime. The current demo uses a thread executor and starts no process pool.
 
@@ -21,7 +23,7 @@ Open [the local viewer](http://127.0.0.1:8766/) and click **Play**. The status s
 2. In the [Render Dashboard](https://dashboard.render.com/), choose **New → Web Service → Git Provider**. Connect your Git account if prompted, select the repository, and click **Connect**.
 3. Enter a service name, select branch **phase2-spatial-ui**, and choose **Docker** as the runtime. Leave **Root Directory** blank if the Dockerfile is at the repository root. For a parent repository, enter the relative directory containing this README and Dockerfile. Use **./Dockerfile** if prompted for the Dockerfile path. Leave **Docker Command** blank to use the image startup command.
 4. Select an instance plan and keep one instance for the demo, since playback state is in memory and shared by viewers. Under **Advanced**, set **Health Check Path** to **/healthz**. Add environment variables **MAX_FPS=12** and **DISABLE_PROCESS_POOL=1**. Render supplies **PORT**. Keep auto-deploy off if only approved commits should go live.
-5. Click **Create Web Service**. Wait for the deployment to go live, then open the service's HTTPS URL. Check **/healthz**, click **Play** on the main page, and look for **WebSocket** with advancing frames. The browser derives **wss://** from the HTTPS page URL. For subsequent approved changes, push the branch and choose **Manual Deploy → Deploy latest commit**.
+5. Click **Create Web Service**. Wait for the deployment to go live, then open the service's HTTPS URL. Check **/healthz**, click **Play** on the main page, and look for green **LIVE** status with advancing frames. The browser derives **wss://** from the HTTPS page URL. For subsequent approved changes, push the branch and choose **Manual Deploy → Deploy latest commit**.
 
 See [Render Web Services](https://render.com/docs/web-services) and [Health Checks](https://render.com/docs/health-checks).
 

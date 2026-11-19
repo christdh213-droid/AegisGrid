@@ -6,16 +6,51 @@
   <link rel="stylesheet" href="/static/viewer.css">
 </head>
 <body>
-  <canvas id="rightCanvas" aria-label="Baseline and adaptive LiDAR split map"></canvas>
+  <canvas id="rightCanvas" aria-label="Baseline and adaptive LiDAR map"></canvas>
   <canvas id="leftCanvas" hidden width="256" height="256"></canvas>
-  <header><strong>DRDO SIH26053 · Adaptive 2.5D LiDAR</strong><span id="connection">Connecting</span><span id="fps">Render FPS —</span><a href="/legacy">Legacy viewer</a></header>
-  <div class="labels"><span>Baseline Fixed 0.25 m Grid · 65,536 cells</span><span id="adaptiveLabel">Adaptive Quadtree</span></div>
+  <header>
+    <div class="glass identity"><div class="mark" aria-hidden="true">◈</div><div><div class="eyebrow">SIH26053 / DRDO</div><strong>Adaptive LiDAR</strong></div></div>
+    <nav class="glass modes" aria-label="Map mode">
+      <button data-mode="split" aria-pressed="true">Split wipe</button>
+      <button data-mode="baseline" aria-pressed="false">Baseline</button>
+      <button data-mode="adaptive" aria-pressed="false">Adaptive</button>
+      <button data-mode="risk" aria-pressed="false">Risk</button>
+    </nav>
+    <div class="glass live-tools"><span id="connection" role="status">Connecting</span><button id="upload">Upload LiDAR</button><input id="file" type="file" accept=".bin,.csv" hidden></div>
+  </header>
+  <div class="labels"><span id="baselineLabel">Baseline · 0.25 m grid</span><span id="adaptiveLabel">Adaptive quadtree</span></div>
   <button id="wipe" aria-label="Move split divider" title="Drag or use left/right arrows">↔</button>
-  <footer>
-    <button id="play">Play</button><button id="pause">Pause</button><button id="step">Step</button><button id="reset">Reset</button>
+  <aside class="glass telemetry" aria-label="Telemetry and perception settings">
+    <div class="eyebrow">Live simulation</div>
+    <h1>Telemetry</h1>
+    <div id="fps">Render FPS —</div>
+    <div class="numbers">
+      <div><span>Cell reduction</span><strong id="reduction">—</strong></div>
+      <div><span>Memory saved (est.)</span><strong id="memory">—</strong></div>
+    </div>
+    <p id="metrics">Waiting for frame</p>
+    <section>
+      <h2>Perception</h2>
+      <label class="setting">Dust filter<input type="checkbox" data-config="sor_enabled" checked></label>
+      <label class="setting">Dust injection <output id="dustValue">0%</output></label>
+      <input aria-label="Dust injection" type="range" min="0" max="15" value="0" id="dust">
+      <label class="setting">Hill tilt<input type="checkbox" data-config="simulate_hill_tilt"></label>
+      <label class="setting">IMU levelling<input type="checkbox" data-config="imu_levelling_enabled" checked></label>
+      <p id="perception"></p>
+    </section>
+    <section aria-label="Risk legend">
+      <h2>Terrain risk</h2>
+      <div id="riskBar" class="risk-bar" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div class="legend">
+        <span><i></i> Safe <b id="safe">—</b></span><span><i></i> Caution <b id="caution">—</b></span>
+        <span><i></i> Hazard <b id="hazard">—</b></span><span><i></i> Unknown <b id="unknown">—</b></span>
+      </div>
+    </section>
+  </aside>
+  <footer class="glass">
+    <button id="play">▶ Play</button><button id="pause">Pause</button><button id="step">Step</button><button id="reset">Reset</button>
     <label>Speed <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
-    <button id="home">Reset view</button><span id="metrics">Waiting for frame</span>
-    <span id="perception"></span>
+    <button id="home">Reset view</button><button id="returnLive" hidden>Return to live</button>
   </footer>
   <output id="error" role="status"></output>
   <script type="module" src="/static/js/viewer.js"></script>
